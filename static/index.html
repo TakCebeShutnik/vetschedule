@@ -13,6 +13,8 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
 <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192"/>
 <link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+<script src="/config.js"></script>
+<script src="/config.local.js"></script>
 <title>VetSchedule</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -101,6 +103,16 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
 .lesson-subject{font-weight:600;font-size:14px;line-height:1.3;margin-bottom:4px;transition:color var(--trans)}
 .lesson-meta{font-size:13px;color:var(--text2);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .lesson-meta span{display:flex;align-items:center;gap:4px}
+.lesson--cancelled{opacity:.78}
+.lesson--cancelled .lesson-subject{text-decoration:line-through;opacity:.82}
+.lesson-cancel-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(239,68,68,.22);color:#f87171;margin-bottom:4px}
+.lesson-cancel-btn{margin-top:8px;padding:8px 12px;font-size:13px;font-weight:600;background:transparent;border:1px solid rgba(239,68,68,.4);border-radius:8px;color:#f87171;width:100%;cursor:pointer;transition:all var(--trans)}
+.lesson-cancel-btn:hover{background:rgba(239,68,68,.12)}
+.lesson-cancel-btn.restore{border-color:rgba(16,185,129,.45);color:#34d399}
+.lesson-cancel-btn.restore:hover{background:rgba(16,185,129,.12)}
+[data-theme="light"] .lesson-cancel-badge{background:rgba(239,68,68,.12);color:#b91c1c}
+[data-theme="light"] .lesson-cancel-btn{color:#b91c1c;border-color:rgba(185,28,28,.35)}
+[data-theme="light"] .lesson-cancel-btn.restore{color:#047857;border-color:rgba(4,120,87,.35)}
 .lesson-hw-count{display:none;font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;background:var(--accent);color:#fff;white-space:nowrap;margin-left:auto;box-shadow:0 1px 6px rgba(0,0,0,.25)}
 .lesson-hw-count.visible{display:inline-flex;align-items:center}
 .lesson-hw-panel{grid-column:1;grid-row:2;max-height:0;opacity:0;overflow:hidden;padding:0 0;margin:0;border-top:1px solid transparent;pointer-events:none;border-radius:0 0 calc(var(--radius-sm) - 2px) calc(var(--radius-sm) - 2px);transform:translateY(-8px);transition:max-height .5s cubic-bezier(.4,0,.2,1),opacity .4s ease,transform .45s cubic-bezier(.4,0,.2,1),padding .38s ease,margin .38s ease,border-color .3s ease}
@@ -401,7 +413,7 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
           <details class="hw-code-details">
             <summary>Про код редактора</summary>
             <div class="hw-code-details-body">
-              <p class="hw-toolbar-hint">Добавлять, редактировать и удалять задания можно только по коду.</p>
+              <p class="hw-toolbar-hint">По коду: домашние задания и отметка отмены пар (если PDF не обновили).</p>
               <p class="hw-toolbar-hint hw-code-meta">Код запоминается в этой вкладке до её закрытия. <button type="button" class="hw-code-reset" onclick="HW.forgetCode()">Забыть код</button></p>
             </div>
           </details>
@@ -485,12 +497,46 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
 const SUBJECTS=['Организация ветеринарного дела','Ветеринарная токсикология','Акушерство и гинекология животных','Паразитология и инвазионные болезни животных','Эпизоотология и инфекционные болезни животных','Ветеринарно-санитарная экспертиза','Общая и частная хирургия','Биология и патология жвачных','Внутренние незаразные болезни животных'];
 
 const API=(()=>{
-  async function get(path,params={}){const url=new URL(path,location.origin);Object.entries(params).forEach(([k,v])=>v!=null&&url.searchParams.set(k,v));const r=await fetch(url);if(!r.ok)throw new Error(await r.text());return r.json()}
-  async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json()}
-  async function put(path,data){const r=await fetch(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json()}
-  async function del(path){const r=await fetch(path,{method:'DELETE'});if(!r.ok)throw new Error(await r.text())}
-  async function upload(path,file){const fd=new FormData();fd.append('file',file);const r=await fetch(path,{method:'POST',body:fd});if(!r.ok)throw new Error(await r.text());return r.json()}
-  return{get,post,put,del,upload}
+  const LOCAL_API='http://127.0.0.1:8000';
+  function apiRoot(){
+    const ext=(typeof window.__VET_API_BASE__==='string'&&window.__VET_API_BASE__.trim())?window.__VET_API_BASE__.trim().replace(/\/$/,''):'';
+    if(ext)return ext;
+    if(location.protocol==='file:')return LOCAL_API;
+    const h=location.hostname;
+    const isLocal=h==='localhost'||h==='127.0.0.1';
+    if(isLocal&&location.port&&location.port!=='8000')return LOCAL_API;
+    if(location.hostname.endsWith('.vercel.app')&&!ext)return '';
+    return location.origin;
+  }
+  function apiUrl(path){
+    const root=apiRoot();
+    if(!root)throw new Error(apiFetchHint());
+    const p=path.startsWith('/')?path:'/'+path;
+    if(p.startsWith('/api/'))return root+p;
+    return root+'/api'+p;
+  }
+  function apiFetchHint(){
+    if(location.protocol==='file:')return 'Откройте сайт через http://localhost:8000 (python run.py), а не файл с диска.';
+    if(location.hostname.endsWith('.vercel.app')&&!(window.__VET_API_BASE__||'').trim())
+      return 'На Vercel не задан API_PUBLIC_URL — укажите URL PythonAnywhere в настройках проекта и пересоберите.';
+    const root=apiRoot()||LOCAL_API;
+    return `Нет связи с API (${root}). Запустите сервер: python run.py`;
+  }
+  async function request(url,opts){
+    let r;
+    try{r=await fetch(url,opts)}
+    catch(_){throw new Error(apiFetchHint())}
+    if(!r.ok){const t=await r.text();throw new Error(t||`HTTP ${r.status}`)}
+    const ct=r.headers.get('content-type')||'';
+    return ct.includes('application/json')?r.json():r.text();
+  }
+  async function get(path,params={}){const url=new URL(apiUrl(path));Object.entries(params).forEach(([k,v])=>v!=null&&url.searchParams.set(k,v));return request(url)}
+  async function post(path,data){return request(apiUrl(path),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})}
+  async function put(path,data){return request(apiUrl(path),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})}
+  async function del(path){return request(apiUrl(path),{method:'DELETE'})}
+  async function upload(path,file){const fd=new FormData();fd.append('file',file);return request(apiUrl(path),{method:'POST',body:fd})}
+  function fileUrl(fileId){return apiUrl(`/api/files/${fileId}`)}
+  return{get,post,put,del,upload,apiRoot,fileUrl}
 })();
 
 /** Статусы ДЗ: поставь true и раскомментируй блоки «Статус» в HTML выше */
@@ -499,7 +545,7 @@ const HW_STATUS_ENABLED=false;
 const HW_EDITOR_CODE='0801';
 function ensureEditorCode(){
   try{if(sessionStorage.getItem('vs_hw_code')===HW_EDITOR_CODE)return true}catch(_){}
-  const code=prompt('Введите код, чтобы добавлять или изменять задания:');
+  const code=prompt('Введите код редактора (ДЗ и отмена пар):');
   if(code===HW_EDITOR_CODE){try{sessionStorage.setItem('vs_hw_code',HW_EDITOR_CODE)}catch(_){};return true}
   if(code!==null)toast('Неверный код','error');
   return false;
@@ -555,11 +601,20 @@ const App=(()=>{
     const uid=`${dayDate.replace(/\//g,'_')}_${idx}`;
     const deadline=dateKeyToISO(dayDate,ls.time);
     const cleanE=clean.replace(/'/g,"&#39;");
-    return `<div class="lesson ${type}" id="lesson-${uid}">
+    const cancelled=!!ls.cancelled;
+    const cancelCls=cancelled?' lesson--cancelled':'';
+    const cancelBadge=cancelled?'<span class="lesson-cancel-badge">❌ ОТМЕНЕНО</span>':'';
+    const btnCls=cancelled?'lesson-cancel-btn restore':'lesson-cancel-btn';
+    const btnLabel=cancelled?'↩ Вернуть в расписание':'❌ Отметить отмену';
+    const subjEnc=encodeURIComponent(ls.subject||'');
+    const dayEnc=encodeURIComponent(dayDate);
+    const timeEnc=encodeURIComponent(ls.time||'');
+    return `<div class="lesson ${type}${cancelCls}" id="lesson-${uid}">
       <div class="lesson-main" onclick="LessonHW.toggle('${uid}','${cleanE}')">
         <div class="lesson-time">${esc(ls.time)}</div>
         <div class="lesson-body">
           <span class="lesson-type-badge">${labels[type]}</span>
+          ${cancelBadge}
           <div class="lesson-subject">${esc(clean)}</div>
           <div class="lesson-meta">
             ${ls.teacher?`<span>👤 ${esc(ls.teacher)}</span>`:''}
@@ -570,8 +625,9 @@ const App=(()=>{
       </div>
       <div class="lesson-hw-panel" id="hwp-${uid}">
         <div class="lesson-hw-panel-title">📋 Домашние задания по предмету</div>
-        <p class="lesson-hw-code-hint">Добавление и изменение — по коду.</p>
+        <p class="lesson-hw-code-hint">ДЗ и отмена пары — по тому же коду.</p>
         <div class="lesson-hw-mini" id="hwm-${uid}"><div class="lesson-hw-panel-empty">Загрузка…</div></div>
+        <button type="button" class="${btnCls}" data-day="${dayEnc}" data-time="${timeEnc}" data-subject="${subjEnc}" onclick="LessonCancel.toggleBtn(this)">${btnLabel}</button>
         <button class="lesson-hw-panel-add" onclick="HWModal.openFromLesson('${cleanE}','${deadline}')">+ Добавить ДЗ</button>
       </div>
     </div>`;
@@ -600,8 +656,48 @@ const App=(()=>{
   function prevWeek(){const ws=state.allWeeks.map(w=>w.week).sort((a,b)=>a-b),i=ws.indexOf(state.weekNum);if(i>0){state.weekNum=ws[i-1];renderWeek()}else toast('Это первая неделя расписания','info')}
   function nextWeek(){const ws=state.allWeeks.map(w=>w.week).sort((a,b)=>a-b),i=ws.indexOf(state.weekNum);if(i<ws.length-1){state.weekNum=ws[i+1];renderWeek()}else toast('Это последняя неделя расписания','info')}
   function goToday(){const t=currentISOWeek();if(state.allWeeks.find(w=>w.week===t)){state.weekNum=t;renderWeek()}else toast('Текущая неделя не найдена','info')}
+  async function reloadSchedule(){
+    if(!state.group)return;
+    try{
+      const data=await API.get(`/api/schedule/${encodeURIComponent(state.group)}`);
+      state.allWeeks=data.weeks||[];
+      renderWeek();
+    }catch(e){toast('Ошибка: '+e.message,'error')}
+  }
   async function init(){loadState();setTheme(state.theme);if(state.group)await selectGroup(state.group);else showPicker()}
-  return{init,showPicker,toggleTheme,setTab,toggleDay,prevWeek,nextWeek,goToday,get group(){return state.group},get allWeeks(){return state.allWeeks}}
+  return{init,showPicker,toggleTheme,setTab,toggleDay,prevWeek,nextWeek,goToday,reloadSchedule,get group(){return state.group},get allWeeks(){return state.allWeeks}}
+})();
+
+const LessonCancel=(()=>{
+  async function toggle(dayDate,time,subject){
+    if(!ensureEditorCode())return;
+    const group=App.group;
+    if(!group){toast('Группа не выбрана','error');return}
+    let code=HW_EDITOR_CODE;
+    try{const s=sessionStorage.getItem('vs_hw_code');if(s)code=s}catch(_){}
+    try{
+      const res=await API.post('/api/lesson-overrides/toggle',{
+        editor_code:code,
+        group_name:group,
+        day_date:dayDate,
+        time:time,
+        subject:subject,
+      });
+      toast(res.cancelled?'Пара отмечена отменённой':'Отмена снята',res.cancelled?'info':'success');
+      await App.reloadSchedule();
+    }catch(e){
+      const msg=(e.message||String(e)).toLowerCase();
+      if(msg.includes('403')||msg.includes('неверный'))toast('Неверный код','error');
+      else toast('Ошибка: '+e.message,'error');
+    }
+  }
+  function toggleBtn(btn){
+    const day=decodeURIComponent(btn.dataset.day||'');
+    const time=decodeURIComponent(btn.dataset.time||'');
+    const subject=decodeURIComponent(btn.dataset.subject||'');
+    toggle(day,time,subject);
+  }
+  return{toggle,toggleBtn};
 })();
 
 const LessonHW=(()=>{
@@ -643,7 +739,7 @@ const LessonHW=(()=>{
         const dl=hw.deadline?fmtDeadline(hw.deadline):null;
         const subjE=hw.subject.replace(/'/g,"&#39;");
         const descBlock=hw.description?`<div class="lesson-hw-mini-desc">${esc(hw.description)}</div>`:'';
-        const fl=(hw.files||[]).length?(hw.files||[]).map(f=>`<a href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📎 ${esc(f.filename)}</a>`).join(''):'<span class="lesson-hw-mini-files-empty">Нет вложений</span>';
+        const fl=(hw.files||[]).length?(hw.files||[]).map(f=>`<a href="${API.fileUrl(f.id)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📎 ${esc(f.filename)}</a>`).join(''):'<span class="lesson-hw-mini-files-empty">Нет вложений</span>';
         return `<div class="lesson-hw-mini-item" id="lhwi-${hw.id}">
           <div class="lesson-hw-mini-top" onclick="LessonHW.toggleMini(event,this)">
             <div class="lesson-hw-mini-dot ${HW_STATUS_ENABLED?hw.status:'neutral'}"></div>
@@ -695,7 +791,7 @@ const HW=(()=>{
   function hwCardHtml(hw,isPast){
     const pastCls=isPast?' hw-item--past':'';
     const dl=hw.deadline?fmtDeadline(hw.deadline):null;
-    const files=(hw.files||[]).map(f=>`<a class="hw-file-badge" href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a>`).join('');
+    const files=(hw.files||[]).map(f=>`<a class="hw-file-badge" href="${API.fileUrl(f.id)}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a>`).join('');
     const fileBlock=files?`<div class="hw-detail-files">${files}</div>`:'<div class="hw-detail-files"><span class="hw-detail-empty">Нет прикреплённых файлов</span></div>';
     const stLabel=statusLabel(hw.status);
     const metaExtra=stLabel?`<span>${stLabel}</span>`:'';
@@ -781,7 +877,7 @@ const HWModal=(()=>{
     const el=$id('file-list');if(!el)return;
     let html='';
     attachedFiles.forEach(f=>{
-      html+=`<div class="hw-file-row"><a href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a><button type="button" class="hw-file-row-remove" onclick="HWModal.removeServerFile(${f.id})" title="Удалить">${iconTrash('icon-trash icon-trash--sm')}</button></div>`;
+      html+=`<div class="hw-file-row"><a href="${API.fileUrl(f.id)}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a><button type="button" class="hw-file-row-remove" onclick="HWModal.removeServerFile(${f.id})" title="Удалить">${iconTrash('icon-trash icon-trash--sm')}</button></div>`;
     });
     pendingFiles.forEach((f,i)=>{
       html+=`<div class="hw-file-row"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><button type="button" class="hw-file-row-remove" onclick="HWModal.removePendingFile(${i})" title="Убрать из списка">${iconTrash('icon-trash icon-trash--sm')}</button></div>`;

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from database import init_db, get_db, Homework, HomeworkFile, User
+from lesson_overrides import apply_to_weeks, apply_to_day, toggle_override
 from schedule_utils import load_group, list_groups, get_week, classify_lesson
 
 # ─── Инициализация ───────────────────────────────────────────────────────────
@@ -27,9 +28,12 @@ from schedule_utils import load_group, list_groups, get_week, classify_lesson
 init_db()
 app = FastAPI(title="VetSchedule API", version="1.0.0")
 
+_cors_raw = (config.CORS_ORIGINS or "*").strip()
+_cors_origins = ["*"] if _cors_raw == "*" else [o.strip() for o in _cors_raw.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +59,15 @@ class UserCreate(BaseModel):
     name: str
     group_name: Optional[str] = None
 
+
+class LessonOverrideToggle(BaseModel):
+    editor_code: str
+    group_name: str
+    day_date: str
+    time: str
+    subject: str
+    note: Optional[str] = None
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def parse_deadline(s: Optional[str]) -> Optional[datetime]:
@@ -66,6 +79,25 @@ def parse_deadline(s: Optional[str]) -> Optional[datetime]:
         except ValueError:
             pass
     return None
+
+
+def require_editor_code(code: Optional[str]) -> None:
+    if not code or code.strip() != config.EDITOR_CODE:
+        raise HTTPException(403, "Неверный код доступа")
+
+
+def _enrich_weeks(group: str, weeks: list, db: Session) -> None:
+    for week in weeks:
+        for day in week.get("days", []):
+            for ls in day.get("lessons", []):
+                ls["type"] = classify_lesson(ls["subject"])
+    apply_to_weeks(group, weeks, db)
+
+
+def _enrich_day(group: str, day: dict, db: Session) -> None:
+    for ls in day.get("lessons", []):
+        ls["type"] = classify_lesson(ls["subject"])
+    apply_to_day(group, day, db)
 
 
 def hw_to_dict(hw: Homework) -> dict:
@@ -93,21 +125,17 @@ def api_groups():
 
 
 @app.get("/api/schedule/{group}")
-def api_schedule(group: str):
+def api_schedule(group: str, db: Session = Depends(get_db)):
     """Полное расписание группы."""
     data = load_group(group)
     if data is None:
         raise HTTPException(404, f"Расписание группы '{group}' не найдено")
-    # Обогащаем каждое занятие типом
-    for week in data.get("weeks", []):
-        for day in week.get("days", []):
-            for ls in day.get("lessons", []):
-                ls["type"] = classify_lesson(ls["subject"])
+    _enrich_weeks(group, data.get("weeks", []), db)
     return data
 
 
 @app.get("/api/schedule/{group}/week/{week_num}")
-def api_schedule_week(group: str, week_num: int):
+def api_schedule_week(group: str, week_num: int, db: Session = Depends(get_db)):
     """Расписание конкретной недели (ISO номер)."""
     data = load_group(group)
     if data is None:
@@ -115,14 +143,12 @@ def api_schedule_week(group: str, week_num: int):
     week = get_week(data, week_num)
     if week is None:
         raise HTTPException(404, f"Неделя {week_num} не найдена в расписании")
-    for day in week.get("days", []):
-        for ls in day.get("lessons", []):
-            ls["type"] = classify_lesson(ls["subject"])
+    _enrich_weeks(group, [week], db)
     return week
 
 
 @app.get("/api/schedule/{group}/today")
-def api_today(group: str):
+def api_today(group: str, db: Session = Depends(get_db)):
     from schedule_utils import today_key, get_day
     data = load_group(group)
     if data is None:
@@ -130,13 +156,12 @@ def api_today(group: str):
     day, week = get_day(data, today_key())
     if day is None:
         return {"message": "Сегодня занятий нет", "day": None}
-    for ls in day.get("lessons", []):
-        ls["type"] = classify_lesson(ls["subject"])
+    _enrich_day(group, day, db)
     return {"day": day, "week": week}
 
 
 @app.get("/api/schedule/{group}/tomorrow")
-def api_tomorrow(group: str):
+def api_tomorrow(group: str, db: Session = Depends(get_db)):
     from schedule_utils import tomorrow_key, get_day
     data = load_group(group)
     if data is None:
@@ -144,9 +169,24 @@ def api_tomorrow(group: str):
     day, week = get_day(data, tomorrow_key())
     if day is None:
         return {"message": "Завтра занятий нет", "day": None}
-    for ls in day.get("lessons", []):
-        ls["type"] = classify_lesson(ls["subject"])
+    _enrich_day(group, day, db)
     return {"day": day, "week": week}
+
+
+@app.post("/api/lesson-overrides/toggle")
+def api_lesson_override_toggle(body: LessonOverrideToggle, db: Session = Depends(get_db)):
+    """Отметить пару отменённой или вернуть (нужен код редактора)."""
+    require_editor_code(body.editor_code)
+    if not load_group(body.group_name):
+        raise HTTPException(404, "Группа не найдена")
+    return toggle_override(
+        db,
+        body.group_name,
+        body.day_date,
+        body.time,
+        body.subject,
+        body.note,
+    )
 
 
 # ─── Homework endpoints ──────────────────────────────────────────────────────
@@ -305,12 +345,6 @@ def api_user_get(telegram_id: int, db: Session = Depends(get_db)):
 # ─── Static / SPA ────────────────────────────────────────────────────────────
 
 static_dir = Path("static")
-
-
-@app.get("/.well-known/appspecific/com.chrome.devtools.json", include_in_schema=False)
-def chrome_devtools_stub():
-    """Пустой ответ для Chrome DevTools — убирает лишний 404 в логах."""
-    return {}
 
 
 @app.get("/favicon.ico", include_in_schema=False)

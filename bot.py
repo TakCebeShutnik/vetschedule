@@ -34,7 +34,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 API_BASE = config.API_INTERNAL_URL or f"http://127.0.0.1:{config.PORT}/api"
-API_TIMEOUT = config.API_HTTP_TIMEOUT
 SITE_BASE = config.SITE_URL.rstrip("/")
 SUPPORT_TELEGRAM_URL = "https://t.me/cc0untN0tAF0und"
 
@@ -54,31 +53,30 @@ SUBJECTS = [
 
 # ─── Флаги (статусы ДЗ временно выключены — поставь True, чтобы вернуть) ─────
 HW_STATUS_ENABLED = False
-HW_EDITOR_CODE = "0801"
+HW_EDITOR_CODE = config.EDITOR_CODE
 
 # Состояния /addhw: сначала код, затем предмет → описание → дедлайн
 HW_CODE, HW_SUBJECT, HW_DESCRIPTION, HW_DEADLINE = range(4)
+# Состояния отмены пары: код → день → пара
+LES_CODE, LES_DAY, LES_PICK = 10, 11, 12
 
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
 
-def _api_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=API_TIMEOUT)
-
 async def api_get(path: str, **params) -> dict:
-    async with _api_client() as c:
+    async with httpx.AsyncClient(timeout=10) as c:
         r = await c.get(f"{API_BASE}{path}", params=params)
         r.raise_for_status()
         return r.json()
 
 async def api_post(path: str, json: dict) -> dict:
-    async with _api_client() as c:
+    async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(f"{API_BASE}{path}", json=json)
         r.raise_for_status()
         return r.json()
 
 async def api_put(path: str, json: dict) -> dict:
-    async with _api_client() as c:
+    async with httpx.AsyncClient(timeout=10) as c:
         r = await c.put(f"{API_BASE}{path}", json=json)
         r.raise_for_status()
         return r.json()
@@ -303,6 +301,8 @@ async def cb_group_select(update: Update, ctx):
     ], [
         InlineKeyboardButton("📋 ДЗ",         callback_data="do:hw"),
         InlineKeyboardButton("➕ Добавить ДЗ", callback_data="do:addhw"),
+    ], [
+        InlineKeyboardButton("❌ Отмена пары", callback_data="do:cancellesson"),
     ]])
     support = (
         f"\n\n💬 <a href=\"{SUPPORT_TELEGRAM_URL}\">Техподдержка в Telegram</a>"
@@ -842,6 +842,253 @@ async def hw_cancel(update: Update, ctx):
     return ConversationHandler.END
 
 
+# ─── Отмена пары (код → день → пара) ─────────────────────────────────────────
+
+async def _cancellesson_prompt_code(target):
+    await target.reply_text(
+        "❌ <b>Отмена / возврат пары</b>\n"
+        f"{sep_line()}\n\n"
+        "Если пару отменили, но PDF не обновили — отметьте здесь.\n"
+        "Повторное нажатие по той же паре <b>снимает</b> отмену.\n\n"
+        f"Отправь код ({len(config.EDITOR_CODE)} цифры) или /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_cancellesson(update: Update, ctx):
+    group = get_group(ctx)
+    if not group:
+        await update.effective_message.reply_text(
+            "⚠️ <b>Группа не выбрана</b>\n\n/start",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    await _cancellesson_prompt_code(update.effective_message)
+    return LES_CODE
+
+
+async def cb_cancellesson_start(update: Update, ctx):
+    query = update.callback_query
+    await query.answer()
+    group = get_group(ctx)
+    if not group:
+        await query.message.reply_text(
+            "⚠️ <b>Группа не выбрана</b>\n\n/start",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    await _cancellesson_prompt_code(query.message)
+    return LES_CODE
+
+
+async def cancel_check_code(update: Update, ctx):
+    if update.message.text.strip() != config.EDITOR_CODE:
+        await update.message.reply_text(
+            "❌ <b>Неверный код.</b>\n\n/cancellesson — попробовать снова",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    ctx.user_data["editor_code"] = config.EDITOR_CODE
+    return await cancel_show_day_menu(update, ctx)
+
+
+def _cancel_date_cb(day_date: str) -> str:
+    """15/05 → cday:15_05 (callback_data ≤ 64 байт)."""
+    return f"cday:{day_date.replace('/', '_')}"
+
+
+def _cancel_date_from_cb(data: str) -> str:
+    return data.split(":", 1)[1].replace("_", "/")
+
+
+async def cancel_show_day_menu(update: Update, ctx):
+    group = get_group(ctx)
+    week_num = current_iso_week()
+    try:
+        week = await api_get(f"/schedule/{group}/week/{week_num}")
+    except Exception as e:
+        await update.effective_message.reply_text(
+            f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    ctx.user_data["cancel_week"] = week
+    ctx.user_data["cancel_week_num"] = week_num
+    rows = [
+        [
+            InlineKeyboardButton("📅 Сегодня", callback_data="cday:t"),
+            InlineKeyboardButton("📆 Завтра", callback_data="cday:tm"),
+        ],
+    ]
+    for day in week.get("days", []):
+        if not day.get("lessons"):
+            continue
+        d = day.get("date") or ""
+        name = weekday_abbr_ru(day.get("day_name") or "") or d
+        n_lessons = len(day["lessons"])
+        n_cancel = sum(1 for ls in day["lessons"] if ls.get("cancelled"))
+        mark = f" ({n_cancel}❌)" if n_cancel else ""
+        rows.append([
+            InlineKeyboardButton(
+                f"{name} {d} · {n_lessons}{mark}",
+                callback_data=_cancel_date_cb(d),
+            ),
+        ])
+    if len(rows) == 1:
+        await update.effective_message.reply_text(
+            "📭 <b>На этой неделе нет занятий</b>\n\n"
+            "Попробуй на сайте или другую неделю позже.",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    rows.append([InlineKeyboardButton("🚫 Отмена", callback_data="cday:abort")])
+    wr = week.get("date_range") or f"неделя {week_num}"
+    await update.effective_message.reply_text(
+        f"📅 <b>Выбери день</b>\n"
+        f"{sep_line()}\n\n"
+        f"<i>{html_escape(wr)}</i>\n\n"
+        "Сегодня / завтра — быстрые кнопки; ниже — все дни недели с парами.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+    return LES_DAY
+
+
+async def cancel_pick_day(update: Update, ctx):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "cday:abort":
+        await query.message.reply_text("🚫 Отменено.", parse_mode=ParseMode.HTML)
+        ctx.user_data.pop("cancel_week", None)
+        return ConversationHandler.END
+    group = get_group(ctx)
+    day = None
+    try:
+        if query.data == "cday:t":
+            data = await api_get(f"/schedule/{group}/today")
+            day = data.get("day")
+        elif query.data == "cday:tm":
+            data = await api_get(f"/schedule/{group}/tomorrow")
+            day = data.get("day")
+        else:
+            date_key = _cancel_date_from_cb(query.data)
+            week = ctx.user_data.get("cancel_week")
+            if week:
+                for d in week.get("days", []):
+                    if d.get("date") == date_key:
+                        day = d
+                        break
+            if day is None:
+                week_num = ctx.user_data.get("cancel_week_num") or current_iso_week()
+                week = await api_get(f"/schedule/{group}/week/{week_num}")
+                ctx.user_data["cancel_week"] = week
+                for d in week.get("days", []):
+                    if d.get("date") == date_key:
+                        day = d
+                        break
+    except Exception as e:
+        await query.message.reply_text(
+            f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return LES_DAY
+    if not day or not day.get("lessons"):
+        await query.message.reply_text(
+            "📭 <b>На этот день занятий нет</b>\n\nВыбери другой день.",
+            parse_mode=ParseMode.HTML,
+        )
+        return LES_DAY
+    return await cancel_show_lessons(query.message, ctx, day)
+
+
+async def cancel_show_lessons(message, ctx, day: dict):
+    lessons = []
+    for ls in day["lessons"]:
+        lessons.append({
+            "day_date": day["date"],
+            "time": ls.get("time") or "",
+            "subject": ls.get("subject") or "",
+            "cancelled": bool(ls.get("cancelled")),
+        })
+    ctx.user_data["cancel_lessons"] = lessons
+    rows = []
+    for i, ls in enumerate(lessons[:12]):
+        subj = clean_subject(ls["subject"])[:32]
+        mark = "↩" if ls["cancelled"] else "❌"
+        rows.append([
+            InlineKeyboardButton(
+                f"{mark} {ls['time']} {subj}",
+                callback_data=f"cles:{i}",
+            ),
+        ])
+    rows.append([InlineKeyboardButton("◀️ Другой день", callback_data="cles:back")])
+    rows.append([InlineKeyboardButton("🚫 Отмена", callback_data="cles:abort")])
+    day_title = html_escape(day.get("day_name") or "")
+    day_date = html_escape(day.get("date") or "")
+    await message.reply_text(
+        f"📅 <b>{day_title}, {day_date}</b>\n\n"
+        "Нажми пару, чтобы <b>переключить</b> отмену (❌ отменить / ↩ вернуть):",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+    return LES_PICK
+
+
+async def cancel_pick_lesson(update: Update, ctx):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "cles:back":
+        return await cancel_show_day_menu(update, ctx)
+    if query.data == "cles:abort":
+        await query.message.reply_text("🚫 Отменено.", parse_mode=ParseMode.HTML)
+        ctx.user_data.pop("cancel_lessons", None)
+        return ConversationHandler.END
+    try:
+        idx = int(query.data.split(":")[1])
+    except ValueError:
+        return LES_PICK
+    lessons = ctx.user_data.get("cancel_lessons") or []
+    if idx < 0 or idx >= len(lessons):
+        await query.answer("Устаревшая кнопка", show_alert=True)
+        return ConversationHandler.END
+    ls = lessons[idx]
+    code = ctx.user_data.get("editor_code") or config.EDITOR_CODE
+    try:
+        result = await api_post("/lesson-overrides/toggle", {
+            "editor_code": code,
+            "group_name": get_group(ctx),
+            "day_date": ls["day_date"],
+            "time": ls["time"],
+            "subject": ls["subject"],
+        })
+    except Exception:
+        await query.message.reply_text(
+            "❌ Не удалось сохранить. Попробуй на сайте.",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+    if result.get("cancelled"):
+        msg = "✅ Пара отмечена как <b>ОТМЕНЕНА</b>."
+    else:
+        msg = "↩ Отмена снята, пара снова <b>в расписании</b>."
+    await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    ctx.user_data.pop("cancel_lessons", None)
+    ctx.user_data.pop("editor_code", None)
+    return ConversationHandler.END
+
+
+async def cancellesson_end(update: Update, ctx):
+    ctx.user_data.pop("cancel_lessons", None)
+    ctx.user_data.pop("cancel_week", None)
+    ctx.user_data.pop("cancel_week_num", None)
+    ctx.user_data.pop("editor_code", None)
+    await update.message.reply_text(
+        "🚫 <b>Отменено</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    return ConversationHandler.END
+
+
 # ─── Callback router ──────────────────────────────────────────────────────────
 
 async def cb_router(update: Update, ctx):
@@ -911,6 +1158,27 @@ def main():
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
 
+    cancellesson_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("cancellesson", cmd_cancellesson),
+            CallbackQueryHandler(cb_cancellesson_start, pattern="^do:cancellesson$"),
+        ],
+        states={
+            LES_CODE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_check_code),
+            ],
+            LES_DAY: [
+                CallbackQueryHandler(cancel_pick_day, pattern=r"^cday:"),
+            ],
+            LES_PICK: [
+                CallbackQueryHandler(cancel_pick_lesson, pattern=r"^cles:"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancellesson_end)],
+        allow_reentry=True,
+        per_message=True,
+    )
+
     addhw_conv = ConversationHandler(
         entry_points=[
             CommandHandler("addhw", cmd_addhw),
@@ -934,6 +1202,7 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", hw_cancel)],
         allow_reentry=True,
+        per_message=True,
     )
 
     app.add_handler(CommandHandler("start",    cmd_start))
@@ -943,6 +1212,7 @@ def main():
     app.add_handler(CommandHandler("week",     cmd_week))
     app.add_handler(CommandHandler("hw",       cmd_hw))
     app.add_handler(addhw_conv)
+    app.add_handler(cancellesson_conv)
     app.add_handler(CallbackQueryHandler(cb_group_select, pattern=r"^grp:"))
     app.add_handler(CallbackQueryHandler(cb_week_nav,     pattern=r"^week:"))
     app.add_handler(CallbackQueryHandler(cb_hw_back,      pattern=r"^hw_back$"))

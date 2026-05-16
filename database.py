@@ -50,6 +50,21 @@ class HomeworkFile(Base):
     homework = relationship("Homework", back_populates="files")
 
 
+class LessonOverride(Base):
+    """Отмена пары (PDF не обновили — правка вручную с кодом)."""
+    __tablename__ = "lesson_overrides"
+    id          = Column(Integer, primary_key=True, index=True)
+    group_name  = Column(String(60), nullable=False, index=True)
+    day_date    = Column(String(16), nullable=False)   # как в JSON: 10/04
+    lesson_time = Column(String(80), nullable=False)
+    subject     = Column(String(300), nullable=False)
+    lesson_key  = Column(String(500), nullable=False, unique=True, index=True)
+    cancelled   = Column(Boolean, nullable=False, default=True)
+    note        = Column(Text, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 

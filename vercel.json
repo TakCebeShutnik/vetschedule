@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.com/vercel.json",
+  "buildCommand": "python scripts/inject_api_config.py",
+  "outputDirectory": "static",
+  "installCommand": "echo skip"
+}

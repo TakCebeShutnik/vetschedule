@@ -1,46 +1,39 @@
-# Парсинг PDF → JSON в schedule_json/ и коммит в репозиторий.
-# После push Render (если включён auto-deploy) подхватит новые файлы.
+# Парсер расписания: скачать PDF → JSON в schedule_json/ → коммит в репозиторий.
+# На PythonAnywhere настройте Scheduled task: git pull (см. .env.example).
 
 name: Update schedule JSON
 
 on:
   schedule:
-    # Понедельник 06:00 UTC (09:00 МСК зимой / 10:00 летом)
-    - cron: "0 6 * * 1"
+    - cron: "0 5 * * 1"
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   parse:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
-      - name: System deps (PDF → DOCX)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y poppler-utils libgl1
-
-      - name: Install Python packages (парсер)
+      - name: Install parser dependencies
         run: pip install -r requirements-parser.txt
 
-      - name: Run parser
+      - name: Run schedule parser
         env:
           SCHEDULE_PDF_URL: ${{ secrets.SCHEDULE_PDF_URL }}
         run: |
           if [ -z "$SCHEDULE_PDF_URL" ]; then
-            echo "SCHEDULE_PDF_URL secret is not set"
-            exit 1
+            echo "SCHEDULE_PDF_URL secret is not set — skip"
+            exit 0
           fi
           python schedule_parser.py --url "$SCHEDULE_PDF_URL" -o schedule_json
 
-      - name: Commit and push if changed
+      - name: Commit JSON if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -49,5 +42,5 @@ jobs:
             echo "No schedule changes"
             exit 0
           fi
-          git commit -m "chore: update schedule JSON from PDF"
+          git commit -m "chore: update schedule_json from PDF"
           git push

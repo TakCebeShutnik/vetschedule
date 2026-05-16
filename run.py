@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Локальный запуск: опционально парсер → API + сайт + бот в одном процессе.
-На Render используйте scripts/render_start.sh (парсер — только GitHub Actions).
+Запускает парсер расписания (опционально), затем FastAPI и Telegram-бота.
+Порядок: JSON из PDF → сервер → бот.
 """
 
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
+# Рабочая директория — каталог проекта (относительные пути schedule.pdf / schedule_json)
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -23,68 +24,88 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def sync_static() -> None:
-    src, dst = ROOT / "index.html", ROOT / "static" / "index.html"
-    if src.is_file():
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-
-
 def run_schedule_parser() -> None:
+    """
+    Скачивание PDF, конвертация, парсинг → JSON в SCHEDULE_DIR.
+    Выполняется до старта API. Если SCHEDULE_PDF_URL не задан — пропуск (остаются старые файлы).
+    """
     from config import config
 
     url = (config.SCHEDULE_PDF_URL or "").strip()
     if not url:
         logger.info(
-            "Парсер пропущен (нет SCHEDULE_PDF_URL). JSON: %s",
+            "Парсер пропущен: не задан SCHEDULE_PDF_URL в .env — используются текущие JSON в %s",
             config.SCHEDULE_DIR,
         )
         return
 
-    logger.info("📥 Парсер: загрузка PDF …")
+    logger.info("📥 Парсер расписания: загрузка PDF и обновление JSON …")
     try:
         from schedule_parser import DOCX_FILENAME, PDF_FILENAME, run_once
 
-        if run_once(url, PDF_FILENAME, DOCX_FILENAME, str(config.SCHEDULE_DIR)):
-            logger.info("✅ JSON расписания обновлены.")
+        ok = run_once(url, PDF_FILENAME, DOCX_FILENAME, str(config.SCHEDULE_DIR))
+        if ok:
+            logger.info("✅ Парсер расписания успешно обновил данные.")
         else:
-            logger.warning("⚠️ Парсер завершился с ошибкой.")
+            logger.warning(
+                "⚠️ Парсер завершился с ошибкой (см. логи schedule_parser выше). "
+                "Сервер стартует с уже имеющимися JSON, если они есть."
+            )
     except Exception:
-        logger.exception("❌ Ошибка парсера.")
+        logger.exception(
+            "❌ Ошибка при запуске парсера; сервер всё равно будет запущен со старыми данными."
+        )
 
 
 def run_bot():
-    from config import config
+    """Запуск Telegram-бота"""
+    logger.info("⏳ Ожидаем запуска сервера перед стартом бота...")
+    time.sleep(4)  # Даём uvicorn полностью подняться (особенно с --reload)
 
-    time.sleep(3)
-    logger.info("🚀 Telegram-бот…")
+    logger.info("🚀 Запуск Telegram-бота...")
     try:
-        subprocess.run([sys.executable, str(ROOT / "bot.py")], check=True)
+        subprocess.run(
+            [sys.executable, str(ROOT / "bot.py")],
+            check=True,
+            capture_output=False,
+        )
     except subprocess.CalledProcessError as e:
-        logger.error("❌ Бот завершился (код %s)", e.returncode)
+        logger.error("❌ Бот завершился с ошибкой (код %s)", e.returncode)
+    except FileNotFoundError:
+        logger.error("❌ Файл bot.py не найден!")
+    except Exception as e:
+        logger.error("❌ Неожиданная ошибка при запуске бота: %s", e)
 
 
 def main():
-    from config import config
+    """Главная функция"""
+    logger.info("=== Запуск vetschedule ===")
 
-    logger.info("=== VetSchedule (локально) ===")
-    sync_static()
     run_schedule_parser()
 
-    threading.Thread(target=run_bot, daemon=True).start()
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
 
-    reload = os.getenv("UVICORN_RELOAD", "1").lower() in ("1", "true", "yes")
-    logger.info("🌐 API + сайт на порту %s (reload=%s)", config.PORT, reload)
+    logger.info("🌐 Запуск FastAPI сервера...")
 
-    import uvicorn
+    try:
+        import uvicorn
+        from config import config
 
-    uvicorn.run(
-        "main:app",
-        host=config.HOST,
-        port=config.PORT,
-        reload=reload,
-        log_level="info",
-    )
+        reload = os.getenv("RELOAD", "1").strip().lower() in ("1", "true", "yes")
+        uvicorn.run(
+            "main:app",
+            host=config.HOST,
+            port=config.PORT,
+            reload=reload,
+            log_level="info",
+        )
+    except ImportError:
+        logger.error("❌ Uvicorn не установлен. Установите: pip install uvicorn")
+    except KeyboardInterrupt:
+        logger.info("⏹️ Сервер остановлен пользователем")
+    except Exception as e:
+        logger.error("❌ Ошибка запуска сервера: %s", e)
 
 
 if __name__ == "__main__":

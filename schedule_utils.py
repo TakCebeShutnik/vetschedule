@@ -103,9 +103,12 @@ def format_week_day_lines(day: dict) -> list[str]:
     ]
     for ls in day.get("lessons", []):
         subj = clean_subject(ls.get("subject") or "")
-        lines.append(
-            f"  • {html_escape(ls.get('time') or '')} — {html_escape(subj[:45])}"
-        )
+        time_s = html_escape(ls.get("time") or "")
+        subj_s = html_escape(subj[:45])
+        if ls.get("cancelled"):
+            lines.append(f"  • <s>{time_s} — {subj_s}</s> ❌ <i>ОТМЕНЕНО</i>")
+        else:
+            lines.append(f"  • {time_s} — {subj_s}")
         if ls.get("teacher"):
             lines.append(
                 f"    👤 {html_escape(ls['teacher'])}  "

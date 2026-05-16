@@ -19,12 +19,14 @@ class Config:
     SITE_URL: str = os.getenv("SITE_URL", "http://localhost:8000")
     # Прямая ссылка на PDF расписания для автозапуска парсера из run.py (пусто = не качать)
     SCHEDULE_PDF_URL: str = os.getenv("SCHEDULE_PDF_URL", "").strip()
-    # Только если бот на другом хосте; на Render оставьте пустым (бот → 127.0.0.1)
+    # База API для бота (если пусто — http://127.0.0.1:PORT/api, как при локальном запуске)
     API_INTERNAL_URL: str = os.getenv("API_INTERNAL_URL", "").strip().rstrip("/")
+    # CORS для фронта на другом домене (Vercel): через запятую, например https://app.vercel.app
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*").strip()
     # Сколько минут до дедлайна отправлять напоминание
     NOTIFY_BEFORE_HOURS: int = int(os.getenv("NOTIFY_BEFORE_HOURS", 24))
-    # Таймаут HTTP-запросов бота к API (секунды; на Render после «сна» нужно больше)
-    API_HTTP_TIMEOUT: float = float(os.getenv("API_HTTP_TIMEOUT", "30"))
+    # Код для правки ДЗ и отмены пар (сайт + бот + API)
+    EDITOR_CODE: str = os.getenv("EDITOR_CODE", os.getenv("HW_EDITOR_CODE", "0801"))
 
     def __post_init__(self):
         self.SCHEDULE_DIR.mkdir(exist_ok=True)

@@ -1,15 +1,27 @@
+# Секреты и локальная конфигурация
 .env
+static/config.local.js
+
+# Python
 .venv/
+venv/
 __pycache__/
 *.py[cod]
-*.pyo
-.Python
+*.egg-info/
+.pytest_cache/
 
-# Данные и артефакты
+# Данные и артефакты парсера
 schedule.db
 uploads/
 schedule.pdf
 schedule_converted.docx
+schedule.docx
 
-# Копия фронта для FastAPI (собирается из index.html)
-static/index.html
+# Случайный git init внутри подпапки (не использовать)
+schedule_json/.git/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

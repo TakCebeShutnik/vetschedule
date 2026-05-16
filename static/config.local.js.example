@@ -1,0 +1,3 @@
+// Скопируйте в static/config.local.js (файл в .gitignore).
+// Для Live Server и т.п., когда сайт не на http://localhost:8000
+window.__VET_API_BASE__ = "http://127.0.0.1:8000";
