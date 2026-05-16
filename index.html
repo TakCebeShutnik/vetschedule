@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="description" content="Расписание занятий — ветеринарный факультет"/>
+<meta name="theme-color" content="#0f1117"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="VetSchedule"/>
+<link rel="manifest" href="/manifest.json"/>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
+<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192"/>
+<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+<title>VetSchedule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#0f1117;--surface:#181b24;--surface2:#1e2232;--border:rgba(255,255,255,.07);--text:#e8eaf2;--text2:#97a3b8;--accent:#4f7fff;--accent-glow:rgba(79,127,255,.25);--lecture:#4f7fff;--lecture-bg:rgba(79,127,255,.12);--lab:#f59e0b;--lab-bg:rgba(245,158,11,.12);--practical:#10b981;--practical-bg:rgba(16,185,129,.12);--other:#8b5cf6;--other-bg:rgba(139,92,246,.12);--radius:14px;--radius-sm:8px;--shadow:0 4px 32px rgba(0,0,0,.4);--font:'Onest',sans-serif;--mono:'JetBrains Mono',monospace;--trans:.2s cubic-bezier(.4,0,.2,1);--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--elev:0 1px 0 rgba(255,255,255,.055) inset,0 10px 42px rgba(0,0,0,.32);color-scheme:dark}
+[data-theme="light"]{--bg:#f0f2f8;--surface:#ffffff;--surface2:#eef0f8;--border:rgba(0,0,0,.08);--text:#1a1d2e;--text2:#5a6180;--accent:#3a6fff;--accent-glow:rgba(58,111,255,.18);--lecture-bg:rgba(79,127,255,.09);--lab-bg:rgba(245,158,11,.09);--practical-bg:rgba(16,185,129,.09);--other-bg:rgba(139,92,246,.09);--shadow:0 4px 24px rgba(0,0,0,.08);--elev:0 1px 0 rgba(255,255,255,.95) inset,0 4px 22px rgba(0,0,0,.07);color-scheme:light}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;min-height:100dvh;line-height:1.6;font-size:15px;transition:background var(--trans),color var(--trans);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);-webkit-tap-highlight-color:rgba(79,127,255,.15)}
+button{font-family:var(--font);cursor:pointer;border:none;outline:none}
+button:focus-visible,.icon-btn:focus-visible,.tab:focus-visible,.nav-btn:focus-visible,.today-btn:focus-visible,.add-hw-btn:focus-visible,.header-support:focus-visible,.modal-close:focus-visible,.date-chip:focus-visible,.lesson-hw-panel-add:focus-visible,.hw-act-btn:focus-visible,.btn:focus-visible,.form-input:focus-visible,.form-textarea:focus-visible,.form-select:focus-visible,.hw-code-reset:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:inherit;text-decoration:none}
+input,textarea,select{font-family:var(--font)}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+.app{display:flex;flex-direction:column;min-height:100vh}
+header{position:sticky;top:0;z-index:100;background:rgba(15,17,23,.8);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 var(--s6);padding-top:env(safe-area-inset-top);min-height:calc(60px + env(safe-area-inset-top));display:flex;align-items:center;gap:var(--s3)}
+[data-theme="light"] header{background:rgba(240,242,248,.85)}
+.logo{font-weight:700;font-size:18px;letter-spacing:-.5px;background:linear-gradient(135deg,#4f7fff,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap}
+.logo span{font-weight:300}
+.header-group{display:flex;align-items:center;gap:10px;padding:6px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:14px;color:var(--text2);transition:all var(--trans);flex:1;max-width:280px}
+.header-group:hover{border-color:var(--accent);color:var(--text)}
+.header-group .current{color:var(--text);font-weight:600}
+.spacer{flex:1}
+.icon-btn{width:38px;height:38px;border-radius:var(--radius-sm);background:var(--surface2);border:1px solid var(--border);color:var(--text2);display:flex;align-items:center;justify-content:center;transition:all var(--trans);font-size:18px}
+.icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+.header-support{font-size:12px;font-weight:600;color:var(--accent);text-decoration:none;padding:8px 12px;min-width:44px;min-height:44px;border-radius:var(--radius-sm);border:1px solid transparent;white-space:nowrap;align-self:center;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0}
+.header-support-text{display:inline}
+.header-support:hover{border-color:var(--accent);background:rgba(96,165,250,.12)}
+[data-theme="light"] .header-support:hover{background:rgba(37,99,235,.1)}
+main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inset-bottom));max-width:1200px;margin:0 auto;width:100%}
+.tabs{display:flex;gap:var(--s1);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s1);margin-bottom:var(--s6)}
+.tab{flex:1;padding:9px 16px;border-radius:calc(var(--radius) - 4px);font-size:14px;font-weight:500;color:var(--text2);background:transparent;transition:all var(--trans);text-align:center}
+.tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 12px var(--accent-glow)}
+.tab:hover:not(.active){background:var(--surface2);color:var(--text)}
+#page-picker{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:var(--s6);animation:fadeUp .5s ease both}
+.picker-title{font-size:28px;font-weight:700;text-align:center}
+.picker-title span{background:linear-gradient(135deg,#4f7fff,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.picker-sub{color:var(--text2);text-align:center;font-size:15px}
+.groups-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s3);width:100%;max-width:600px}
+.group-card{padding:18px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);text-align:center;cursor:pointer;font-weight:600;font-size:15px;letter-spacing:.3px;transition:all var(--trans)}
+.group-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 24px var(--accent-glow);color:var(--accent)}
+.week-nav{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s5);flex-wrap:wrap}
+.week-nav-head{flex:1;min-width:0}
+.week-nav-actions{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.week-nav h2{font-size:17px;font-weight:600;min-width:0;margin:0}
+.week-nav h2 small{display:block;font-size:13px;font-weight:400;color:var(--text2)}
+.nav-btn{padding:8px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-weight:500;color:var(--text);transition:all var(--trans);display:flex;align-items:center;gap:6px}
+.nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+.today-btn{padding:8px 16px;background:var(--accent);border:1px solid transparent;border-radius:var(--radius-sm);font-size:14px;font-weight:600;color:#fff;transition:all var(--trans);box-shadow:0 2px 12px var(--accent-glow)}
+.today-btn:hover{filter:brightness(1.1)}
+.legend{display:flex;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s4)}
+.legend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s2) var(--s3);width:100%}
+.days-grid{display:flex;flex-direction:column;gap:var(--s4)}
+.day-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:box-shadow var(--trans),border-color var(--trans),transform var(--trans);box-shadow:var(--elev)}
+.day-card:hover{border-color:rgba(255,255,255,.12)}
+[data-theme="light"] .day-card:hover{border-color:rgba(0,0,0,.1)}
+.day-card.is-today{border-color:rgba(79,127,255,.35);box-shadow:var(--elev),0 0 0 1px rgba(79,127,255,.2)}
+.day-header{padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;transition:background var(--trans),border-color .35s ease}
+.day-header:hover{background:var(--surface2)}
+.day-label{font-weight:700;font-size:15px}
+.day-date{font-family:var(--mono);font-size:12px;color:var(--text2);background:var(--surface2);padding:3px 8px;border-radius:4px}
+.day-count{margin-left:auto;font-size:13px;color:var(--text2)}
+.day-toggle{color:var(--text2);transition:transform .45s cubic-bezier(.4,0,.2,1)}
+.day-card.collapsed .day-toggle{transform:rotate(-90deg)}
+.day-lessons{padding:12px;display:flex;flex-direction:column;gap:8px;max-height:3200px;opacity:1;overflow:hidden;transition:max-height .48s cubic-bezier(.4,0,.2,1),opacity .38s ease,padding .38s ease,gap .32s ease}
+.day-card.collapsed .day-lessons{max-height:0;opacity:0;padding:0;gap:0;pointer-events:none}
+.day-card.collapsed .day-header{border-bottom-color:transparent}
+/* LESSON */
+.lesson{border-radius:var(--radius-sm);padding:12px 14px;border-left:3px solid transparent;display:grid;grid-template-columns:1fr;grid-template-rows:auto auto;gap:0;align-items:stretch;transition:box-shadow .22s ease,background var(--trans);position:relative;overflow:hidden}
+.lesson:hover{box-shadow:0 2px 14px rgba(0,0,0,.18)}
+[data-theme="light"] .lesson:hover{box-shadow:0 2px 12px rgba(0,0,0,.08)}
+.lesson.lecture  {background:var(--lecture-bg);  border-left-color:var(--lecture)}
+.lesson.lab      {background:var(--lab-bg);       border-left-color:var(--lab)}
+.lesson.practical{background:var(--practical-bg); border-left-color:var(--practical)}
+.lesson.other    {background:var(--other-bg);      border-left-color:var(--other)}
+.lesson-main{display:flex;gap:12px;cursor:pointer;grid-column:1;grid-row:1;min-width:0;padding:2px 0;transition:transform .2s cubic-bezier(.4,0,.2,1)}
+.lesson-main:hover{transform:scale(.98)}
+.lesson-main:hover .lesson-subject{color:var(--accent)}
+.lesson-time{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text2);white-space:nowrap;padding-top:2px;min-width:100px}
+.lesson-body{flex:1;min-width:0}
+.lesson-type-badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.lesson.lecture   .lesson-type-badge{background:var(--lecture-bg);color:var(--lecture)}
+.lesson.lab       .lesson-type-badge{background:var(--lab-bg);color:var(--lab)}
+.lesson.practical .lesson-type-badge{background:var(--practical-bg);color:var(--practical)}
+.lesson.other     .lesson-type-badge{background:var(--other-bg);color:var(--other)}
+.lesson-subject{font-weight:600;font-size:14px;line-height:1.3;margin-bottom:4px;transition:color var(--trans)}
+.lesson-meta{font-size:13px;color:var(--text2);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.lesson-meta span{display:flex;align-items:center;gap:4px}
+.lesson-hw-count{display:none;font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;background:var(--accent);color:#fff;white-space:nowrap;margin-left:auto;box-shadow:0 1px 6px rgba(0,0,0,.25)}
+.lesson-hw-count.visible{display:inline-flex;align-items:center}
+.lesson-hw-panel{grid-column:1;grid-row:2;max-height:0;opacity:0;overflow:hidden;padding:0 0;margin:0;border-top:1px solid transparent;pointer-events:none;border-radius:0 0 calc(var(--radius-sm) - 2px) calc(var(--radius-sm) - 2px);transform:translateY(-8px);transition:max-height .5s cubic-bezier(.4,0,.2,1),opacity .4s ease,transform .45s cubic-bezier(.4,0,.2,1),padding .38s ease,margin .38s ease,border-color .3s ease}
+.lesson.lecture .lesson-hw-panel{background:color-mix(in srgb,var(--lecture-bg) 28%,#040508 72%)}
+.lesson.lab .lesson-hw-panel{background:color-mix(in srgb,var(--lab-bg) 28%,#040508 72%)}
+.lesson.practical .lesson-hw-panel{background:color-mix(in srgb,var(--practical-bg) 28%,#040508 72%)}
+.lesson.other .lesson-hw-panel{background:color-mix(in srgb,var(--other-bg) 28%,#040508 72%)}
+.lesson-hw-panel.open{max-height:min(72vh,720px);opacity:1;padding:14px 14px 12px;margin:10px -14px -12px -14px;border-top-color:rgba(255,255,255,.12);pointer-events:auto;transform:translateY(0)}
+.lesson.lecture .lesson-hw-panel.open{border-top-color:rgba(79,127,255,.22)}
+.lesson.lab .lesson-hw-panel.open{border-top-color:rgba(245,158,11,.25)}
+.lesson.practical .lesson-hw-panel.open{border-top-color:rgba(16,185,129,.25)}
+.lesson.other .lesson-hw-panel.open{border-top-color:rgba(139,92,246,.25)}
+.lesson-hw-panel-title{font-size:11px;font-weight:700;color:var(--text);opacity:.85;text-transform:uppercase;letter-spacing:.55px;margin-bottom:10px}
+.lesson-hw-mini{display:flex;flex-direction:column;gap:8px}
+.lesson-hw-mini-item{border-radius:8px;background:rgba(0,0,0,.12);border:1px solid rgba(255,255,255,.08);overflow:hidden;transition:border-color .25s}
+.lesson-hw-mini-item.expanded{border-color:rgba(255,255,255,.18)}
+.lesson-hw-mini-top{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;font-size:13px;color:var(--text)}
+.lesson-hw-mini-top:hover{background:rgba(255,255,255,.04)}
+.lesson-hw-mini-chev{margin-left:auto;font-size:11px;color:var(--text2);transition:transform .35s ease;flex-shrink:0;padding:2px}
+.lesson-hw-mini-item.expanded .lesson-hw-mini-chev{transform:rotate(180deg)}
+.lesson-hw-mini-detail{max-height:0;opacity:0;overflow:hidden;padding:0 12px;transition:max-height .45s cubic-bezier(.4,0,.2,1),opacity .35s ease,padding .35s ease}
+.lesson-hw-mini-item.expanded .lesson-hw-mini-detail{max-height:400px;opacity:1;padding:0 12px 12px}
+.lesson-hw-mini-desc{font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px;white-space:pre-wrap}
+.lesson-hw-mini-files{display:flex;flex-wrap:wrap;gap:8px}
+.lesson-hw-mini-files a{font-size:12px;padding:5px 10px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--accent);font-weight:500}
+.lesson-hw-mini-files-empty{font-size:12px;color:var(--text2)}
+.lesson-hw-mini-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.lesson-hw-mini-dot.pending{background:#ef4444}.lesson-hw-mini-dot.in_progress{background:#f59e0b}.lesson-hw-mini-dot.done{background:#10b981}
+.lesson-hw-mini-subject{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.lesson-hw-mini-dl{font-size:12px;color:var(--text2);white-space:nowrap}
+.lesson-hw-mini-done{padding:4px 10px;font-size:11px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:6px;color:var(--text);transition:all var(--trans);white-space:nowrap;flex-shrink:0}
+.lesson-hw-mini-done:hover{border-color:#10b981;color:var(--text);background:rgba(16,185,129,.15)}
+.lesson-hw-panel-add{margin-top:10px;padding:8px 12px;font-size:13px;font-weight:600;background:transparent;border:1px dashed rgba(255,255,255,.22);border-radius:8px;color:var(--text);width:100%;text-align:center;transition:all var(--trans)}
+.lesson-hw-panel-add:hover{border-color:var(--accent);color:var(--text);background:rgba(79,127,255,.12)}
+.lesson-hw-panel-empty{font-size:13px;color:var(--text);opacity:.9;padding:6px 0}
+[data-theme="light"] .lesson.lecture .lesson-hw-panel{background:color-mix(in srgb,var(--lecture-bg) 38%,#c5d0e4 62%)}
+[data-theme="light"] .lesson.lab .lesson-hw-panel{background:color-mix(in srgb,var(--lab-bg) 38%,#e0d4bc 62%)}
+[data-theme="light"] .lesson.practical .lesson-hw-panel{background:color-mix(in srgb,var(--practical-bg) 38%,#c0e0d4 62%)}
+[data-theme="light"] .lesson.other .lesson-hw-panel{background:color-mix(in srgb,var(--other-bg) 38%,#d8cce8 62%)}
+[data-theme="light"] .lesson-hw-panel.open{border-top-color:rgba(0,0,0,.12)}
+[data-theme="light"] .lesson-hw-mini-item{background:rgba(255,255,255,.55);border-color:rgba(0,0,0,.1)}
+[data-theme="light"] .lesson-hw-mini-top:hover{background:rgba(0,0,0,.04)}
+[data-theme="light"] .lesson-hw-mini-subject{color:var(--text)}
+[data-theme="light"] .lesson-hw-mini-dl{color:var(--text2)}
+[data-theme="light"] .lesson-hw-mini-done{color:var(--text);border-color:rgba(0,0,0,.12);background:rgba(255,255,255,.4)}
+[data-theme="light"] .lesson-hw-panel-add{color:var(--text);border-color:rgba(0,0,0,.2)}
+[data-theme="light"] .lesson-hw-panel-empty{color:var(--text)}
+/* today */
+.day-card.is-today .day-header{background:linear-gradient(90deg,rgba(79,127,255,.1),transparent)}
+.day-card.is-today .day-label::after{content:"СЕГОДНЯ";font-size:10px;font-weight:700;letter-spacing:.5px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:3px;margin-left:8px;vertical-align:middle}
+/* HW */
+.hw-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s3);margin-bottom:var(--s4);flex-wrap:wrap}
+.hw-toolbar h2{font-size:17px;font-weight:600;margin:0}
+.hw-toolbar-hint{font-size:12px;color:var(--text2);margin:6px 0 0;font-weight:400;max-width:min(520px,100%)}
+.hw-code-meta{font-size:11px;margin-top:6px;line-height:1.45}
+.hw-code-details{margin-top:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);overflow:hidden}
+.hw-code-details summary{cursor:pointer;padding:10px 12px;font-size:12px;font-weight:600;color:var(--text2);list-style:none;user-select:none}
+.hw-code-details summary::-webkit-details-marker{display:none}
+.hw-code-details summary::after{content:'▾';float:right;font-size:11px;transition:transform .25s}
+.hw-code-details[open] summary::after{transform:rotate(180deg)}
+.hw-code-details .hw-code-details-body{padding:0 12px 12px}
+.hw-code-details .hw-toolbar-hint{margin:0 0 8px}
+.hw-code-details .hw-toolbar-hint:last-child{margin-bottom:0}
+.hw-code-reset{background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit;text-decoration:underline;text-underline-offset:2px}
+.hw-code-reset:hover{filter:brightness(1.15)}
+.hw-section-title{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.55px;margin:0 0 var(--s3)}
+.hw-past-details{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);margin-top:var(--s4);overflow:hidden}
+.hw-past-details summary{cursor:pointer;padding:var(--s3) var(--s4);font-weight:600;font-size:13px;color:var(--text2);list-style:none;display:flex;align-items:center;justify-content:space-between;gap:var(--s3);user-select:none;transition:background var(--trans)}
+.hw-past-details summary:hover{background:var(--surface2);color:var(--text)}
+.hw-past-details summary::-webkit-details-marker{display:none}
+.hw-past-details summary::after{content:'▾';font-size:11px;color:var(--text2);transition:transform .25s ease;flex-shrink:0}
+.hw-past-details[open] summary::after{transform:rotate(180deg)}
+.hw-past-inner{padding:0 var(--s3) var(--s4);display:flex;flex-direction:column;gap:var(--s3)}
+.hw-stack{display:flex;flex-direction:column;gap:var(--s3)}
+.hw-item--past{opacity:.88}
+[data-theme="light"] .hw-item--past{opacity:.92}
+.hw-empty--compact{padding:var(--s4) var(--s3);text-align:left}
+.hw-empty--compact h3{font-size:15px;margin-bottom:var(--s2)}
+.lesson-hw-code-hint{font-size:11px;color:var(--text2);margin:6px 0 10px;line-height:1.4}
+.lesson-hw-mini-dot.neutral{background:var(--text2);opacity:.45}
+.add-hw-btn{padding:9px 18px;background:var(--accent);color:#fff;border-radius:var(--radius-sm);font-size:14px;font-weight:600;transition:all var(--trans);box-shadow:0 2px 12px var(--accent-glow);display:flex;align-items:center;gap:6px}
+.add-hw-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.hw-filter-section{margin-bottom:12px;display:flex;flex-direction:column;gap:6px}
+.hw-filter-label{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.hw-filters{display:flex;gap:8px;flex-wrap:wrap}
+.filter-btn{padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text2);transition:all var(--trans)}
+.filter-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.filter-btn:hover:not(.active){border-color:var(--accent);color:var(--accent)}
+.subj-filter-btn{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text2);transition:all var(--trans);white-space:nowrap}
+.subj-filter-btn.active{background:var(--other);border-color:var(--other);color:#fff}
+.subj-filter-btn:hover:not(.active){border-color:var(--other);color:var(--other)}
+.hw-list{display:flex;flex-direction:column;gap:var(--s3)}
+.hw-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:flex;gap:14px;align-items:flex-start;transition:all var(--trans);box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+[data-theme="light"] .hw-item{box-shadow:0 1px 0 rgba(255,255,255,.9) inset}
+.hw-item:hover{box-shadow:var(--shadow)}
+.hw-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.hw-status-dot.pending{background:#ef4444}.hw-status-dot.in_progress{background:#f59e0b}.hw-status-dot.done{background:#10b981}
+.hw-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
+.hw-subject{font-weight:700;font-size:15px;margin-bottom:4px}
+.hw-desc{font-size:14px;color:var(--text2);margin-bottom:8px;line-height:1.5}
+.hw-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--text2)}
+.hw-deadline{display:flex;align-items:center;gap:4px;font-weight:500}
+.hw-deadline.overdue{color:#ef4444}.hw-deadline.soon{color:#f59e0b}
+.hw-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.hw-act-btn{padding:5px 12px;border-radius:6px;font-size:13px;font-weight:500;background:var(--surface2);border:1px solid var(--border);color:var(--text2);transition:all var(--trans)}
+.hw-act-btn:hover{border-color:var(--accent);color:var(--accent)}
+.hw-act-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.hw-act-btn.primary:hover{filter:brightness(1.1)}
+.hw-act-btn.danger:hover{border-color:#ef4444;color:#ef4444}
+.hw-act-btn--icon{padding:6px;min-width:36px;min-height:32px;display:inline-flex;align-items:center;justify-content:center}
+.icon-trash{display:block;width:18px;height:18px;flex-shrink:0}
+.icon-trash--sm{width:15px;height:15px}
+.hw-files{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.hw-file-badge{padding:4px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px}
+.hw-modal-file-list{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.hw-file-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px}
+.hw-file-row a{color:var(--accent);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.hw-file-row-remove{flex-shrink:0;width:30px;height:30px;border-radius:6px;background:transparent;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;transition:all var(--trans)}
+.hw-file-row-remove:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,.1)}
+.hw-summary{display:flex;gap:10px;align-items:flex-start;cursor:pointer;user-select:none;padding:2px 0;border-radius:8px;transition:background .2s}
+.hw-summary:hover{background:rgba(255,255,255,.04)}
+[data-theme="light"] .hw-summary:hover{background:rgba(0,0,0,.04)}
+.hw-summary-inner{flex:1;min-width:0}
+.hw-expand-icon{flex-shrink:0;font-size:12px;color:var(--text2);transition:transform .35s ease;padding:4px}
+.hw-item.expanded .hw-expand-icon{transform:rotate(180deg)}
+.hw-files-expand{max-height:0;opacity:0;overflow:hidden;transition:max-height .45s cubic-bezier(.4,0,.2,1),opacity .35s ease,margin .3s ease}
+.hw-item.expanded .hw-files-expand{max-height:400px;opacity:1;margin-top:10px}
+.hw-detail-files{display:flex;flex-wrap:wrap;gap:8px}
+.hw-detail-empty{font-size:13px;color:var(--text2)}
+.hw-empty{text-align:center;padding:48px 16px;color:var(--text2)}
+.hw-empty .hw-empty-icon{font-size:48px;margin-bottom:16px}
+.hw-empty h3{font-size:18px;color:var(--text);margin-bottom:8px}
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));opacity:0;pointer-events:none;transition:opacity var(--trans)}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s6);width:100%;max-width:520px;max-height:90vh;overflow-y:auto;transform:translateY(16px);transition:transform var(--trans);box-shadow:var(--shadow);scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.modal::-webkit-scrollbar{width:8px}
+.modal::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.modal-title{font-size:18px;font-weight:700}
+.modal-close{width:32px;height:32px;border-radius:var(--radius-sm);background:var(--surface2);color:var(--text2);font-size:18px;display:flex;align-items:center;justify-content:center;transition:all var(--trans)}
+.modal-close:hover{background:var(--border);color:var(--text)}
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px}
+.form-input,.form-textarea,.form-select{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:14px;transition:border-color var(--trans);outline:none}
+.form-input:focus,.form-textarea:focus,.form-select:focus{border-color:var(--accent)}
+.form-textarea{resize:vertical;min-height:80px}
+.form-select option{background:var(--surface2)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.btn{padding:9px 20px;border-radius:var(--radius-sm);font-size:14px;font-weight:600;transition:all var(--trans);display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 2px 12px var(--accent-glow)}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-ghost{background:var(--surface2);border:1px solid var(--border);color:var(--text2)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.file-drop{border:2px dashed var(--border);border-radius:var(--radius-sm);padding:20px;text-align:center;color:var(--text2);font-size:14px;cursor:pointer;transition:all var(--trans)}
+.file-drop:hover,.file-drop.drag{border-color:var(--accent);color:var(--accent)}
+/* AUTOCOMPLETE */
+.autocomplete-wrap{position:relative}
+.autocomplete-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:2000;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow);max-height:220px;overflow-y:auto;display:none}
+.autocomplete-dropdown.open{display:block}
+.ac-item{padding:9px 14px;font-size:14px;cursor:pointer;transition:background var(--trans);border-bottom:1px solid var(--border)}
+.ac-item:last-child{border-bottom:none}
+.ac-item:hover,.ac-item.focused{background:var(--surface2);color:var(--accent)}
+.ac-item b{color:var(--accent)}
+/* DATE CHIPS */
+.date-suggestions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.date-chip{padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;background:var(--surface2);border:1px solid var(--border);color:var(--text2);cursor:pointer;transition:all var(--trans);display:flex;align-items:center;gap:4px}
+.date-chip:hover{border-color:var(--accent);color:var(--accent)}
+.date-chip.selected{background:var(--accent);border-color:var(--accent);color:#fff}
+/* MISC */
+#toast-container{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+.toast{padding:12px 18px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow);font-size:14px;display:flex;align-items:center;gap:10px;max-width:320px;animation:slideIn .3s ease both}
+.toast.success{border-left:3px solid #10b981}.toast.error{border-left:3px solid #ef4444}.toast.info{border-left:3px solid var(--accent)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:none;opacity:1}}
+@keyframes fadeOut{to{opacity:0;transform:translateX(100%)}}
+.loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--text2)}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-right:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes sk-pulse{0%,100%{opacity:.42}50%{opacity:1}}
+.sk-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s3);width:100%;max-width:600px}
+.sk-g-card{height:54px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);animation:sk-pulse 1.05s ease-in-out infinite}
+.sk-g-card:nth-child(2){animation-delay:.1s}.sk-g-card:nth-child(3){animation-delay:.2s}.sk-g-card:nth-child(4){animation-delay:.3s}.sk-g-card:nth-child(5){animation-delay:.4s}.sk-g-card:nth-child(6){animation-delay:.5s}
+.sk-hw-wrap{display:flex;flex-direction:column;gap:var(--s3);min-height:200px;padding:var(--s1) 0}
+.sk-hw-row{display:flex;gap:14px;padding:var(--s4);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);align-items:flex-start;animation:sk-pulse 1.05s ease-in-out infinite}
+.sk-hw-row:nth-child(2){animation-delay:.12s}.sk-hw-row:nth-child(3){animation-delay:.24s}
+.sk-hw-dot{width:10px;height:10px;border-radius:50%;background:var(--surface2);margin-top:6px;flex-shrink:0}
+.sk-hw-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
+.sk-line{height:13px;border-radius:6px;background:var(--surface2)}
+.sk-line.w-88{width:88%}.sk-line.w-55{width:55%;margin-top:var(--s1)}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+.empty{text-align:center;padding:60px 16px;color:var(--text2)}
+.empty-icon{font-size:52px;margin-bottom:16px}
+.empty h3{font-size:20px;color:var(--text);margin-bottom:8px}
+.empty p{max-width:360px;margin:0 auto;line-height:1.6}
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+.animate-in{animation:fadeUp .4s ease both}
+.animate-in:nth-child(1){animation-delay:.05s}.animate-in:nth-child(2){animation-delay:.1s}
+.animate-in:nth-child(3){animation-delay:.15s}.animate-in:nth-child(4){animation-delay:.2s}
+.animate-in:nth-child(5){animation-delay:.25s}
+@media(max-width:640px){
+  header{padding-left:max(var(--s3),env(safe-area-inset-left));padding-right:max(var(--s3),env(safe-area-inset-right));gap:var(--s2)}
+  .logo{font-size:16px;max-width:72px;overflow:hidden;text-overflow:ellipsis}
+  .header-group{max-width:none;min-height:44px;font-size:13px;padding:8px 10px}
+  .header-group .current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw}
+  .header-support-text{display:none}
+  .icon-btn{width:44px;height:44px;flex-shrink:0}
+  main{padding:var(--s4);padding-bottom:calc(var(--s4) + env(safe-area-inset-bottom))}
+  .form-row{grid-template-columns:1fr}
+  .form-input,.form-textarea,.form-select{font-size:16px}
+  .tab{min-height:44px;padding:10px 12px}
+  .week-nav{flex-direction:column;align-items:stretch;gap:var(--s3)}
+  .week-nav-head{width:100%;text-align:center}
+  .week-nav-actions{width:100%;justify-content:center}
+  .week-nav h2{font-size:15px}
+  .nav-btn,.today-btn{min-height:44px;padding:10px 14px}
+  .lesson-main{flex-direction:column;align-items:flex-start;gap:4px}
+  .lesson-time{min-width:0;font-size:11px;padding-top:0;opacity:.9}
+  .lesson-subject{font-size:15px}
+  .lesson{padding:12px var(--s3)}
+  .day-lessons{gap:var(--s2)}
+  .days-grid{gap:var(--s3)}
+  .legend{display:block;margin-bottom:var(--s3)}
+  .legend-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .groups-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+  .group-card{min-height:48px;padding:16px 12px}
+  .hw-toolbar{align-items:stretch}
+  .hw-toolbar .add-hw-btn{width:100%;justify-content:center;min-height:44px}
+  .hw-act-btn{min-height:40px;padding:8px 14px}
+  .hw-act-btn--icon{min-width:44px;min-height:44px}
+  .hw-file-row-remove{width:44px;height:44px}
+  .filter-btn,.subj-filter-btn{min-height:40px;padding:8px 14px}
+  .modal-close{width:44px;height:44px}
+  .date-chip{padding:8px 12px;min-height:44px;font-size:13px}
+  .form-actions{flex-direction:column-reverse}
+  .form-actions .btn{width:100%;justify-content:center;min-height:44px}
+  #toast-container{right:var(--s3);bottom:calc(var(--s3) + env(safe-area-inset-bottom));left:var(--s3);align-items:stretch}
+  .toast{max-width:none}
+  .picker-title{font-size:24px;padding:0 var(--s2)}
+}
+@media(max-width:380px){
+  .logo span{display:none}
+  .nav-btn{padding:10px 12px;font-size:13px}
+}
+@media(min-width:641px){
+  .week-nav{flex-wrap:nowrap}
+  .week-nav-head{text-align:left}
+  .legend-grid{display:flex;flex-wrap:wrap;gap:var(--s3)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="logo">Vet<span>Schedule</span></div>
+  <button class="header-group" onclick="App.showPicker()" title="Сменить группу">
+    📚 <span class="current" id="header-group-name">Выбрать группу</span>
+  </button>
+  <div class="spacer"></div>
+  <a class="header-support" href="https://t.me/cc0untN0tAF0und" target="_blank" rel="noopener noreferrer" title="Техподдержка в Telegram" aria-label="Техподдержка в Telegram"><span aria-hidden="true">💬</span><span class="header-support-text">Поддержка</span></a>
+  <button class="icon-btn" onclick="App.toggleTheme()" title="Сменить тему" id="theme-btn">🌙</button>
+</header>
+<main id="app-main">
+  <section id="page-picker" style="display:none">
+    <div class="picker-title">Выбери <span>свою группу</span></div>
+    <div class="picker-sub">Расписание сразу появится после выбора</div>
+    <div class="groups-grid" id="groups-grid"></div>
+  </section>
+  <section id="page-schedule" style="display:none">
+    <div class="tabs">
+      <button class="tab active" onclick="App.setTab('schedule')">📅 Расписание</button>
+      <button class="tab" onclick="App.setTab('hw')">📋 Домашние задания</button>
+    </div>
+    <div id="view-schedule">
+      <div class="week-nav">
+        <div class="week-nav-head"><h2 id="week-title">Неделя</h2></div>
+        <div class="week-nav-actions">
+          <button class="nav-btn" onclick="App.prevWeek()">← Пред.</button>
+          <button class="today-btn" onclick="App.goToday()">Сегодня</button>
+          <button class="nav-btn" onclick="App.nextWeek()">След. →</button>
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-grid">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--lecture)"></div>Лекция</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--lab)"></div>Лабораторная</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--practical)"></div>Практика</div>
+        </div>
+      </div>
+      <div id="days-container" class="days-grid"></div>
+    </div>
+    <div id="view-hw" style="display:none">
+      <div class="hw-toolbar">
+        <div>
+          <h2>Домашние задания</h2>
+          <details class="hw-code-details">
+            <summary>Про код редактора</summary>
+            <div class="hw-code-details-body">
+              <p class="hw-toolbar-hint">Добавлять, редактировать и удалять задания можно только по коду.</p>
+              <p class="hw-toolbar-hint hw-code-meta">Код запоминается в этой вкладке до её закрытия. <button type="button" class="hw-code-reset" onclick="HW.forgetCode()">Забыть код</button></p>
+            </div>
+          </details>
+        </div>
+        <button class="add-hw-btn" onclick="HWModal.open()">+ Добавить</button>
+      </div>
+      <!-- Фильтр по статусу: раскомментируй блок и выстави HW_STATUS_ENABLED=true в script
+      <div class="hw-filter-section">
+        <div class="hw-filter-label">Статус</div>
+        <div class="hw-filters" id="hw-status-filters">
+          <button class="filter-btn active" data-filter="all"         onclick="HW.setStatusFilter('all')">Все</button>
+          <button class="filter-btn"        data-filter="pending"     onclick="HW.setStatusFilter('pending')">Не сделано</button>
+          <button class="filter-btn"        data-filter="in_progress" onclick="HW.setStatusFilter('in_progress')">В процессе</button>
+          <button class="filter-btn"        data-filter="done"        onclick="HW.setStatusFilter('done')">Сдано</button>
+        </div>
+      </div>
+      -->
+      <div class="hw-filter-section" id="hw-subj-section" style="display:none">
+        <div class="hw-filter-label">Предмет</div>
+        <div class="hw-filters" id="hw-subj-filters"></div>
+      </div>
+      <div id="hw-list" class="hw-list"></div>
+    </div>
+  </section>
+</main>
+
+<!-- HW MODAL -->
+<div class="modal-overlay" id="hw-modal-overlay" onclick="HWModal.bgClose(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="hw-modal-title">Добавить задание</div>
+      <button class="modal-close" onclick="HWModal.close()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Предмет *</label>
+      <div class="autocomplete-wrap" id="ac-wrap">
+        <input class="form-input" id="hw-subject" placeholder="Начни вводить предмет…"
+          autocomplete="off"
+          oninput="HWModal.onSubjectInput(this)"
+          onkeydown="HWModal.onSubjectKey(event)"
+          onfocus="HWModal.onSubjectInput(this)"/>
+        <div class="autocomplete-dropdown" id="ac-dropdown"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Описание задания</label>
+      <textarea class="form-textarea" id="hw-desc" placeholder="Что нужно сделать…"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Дедлайн</label>
+      <input class="form-input" id="hw-deadline" type="datetime-local"/>
+      <div class="date-suggestions" id="date-suggestions"></div>
+    </div>
+    <!-- Поле «Статус»: верни вместе с HW_STATUS_ENABLED в script
+    <div class="form-group">
+      <label class="form-label">Статус</label>
+      <select class="form-select" id="hw-status">
+        <option value="pending">🔴 Не сделано</option>
+        <option value="in_progress">🟡 В процессе</option>
+        <option value="done">✅ Сдано</option>
+      </select>
+    </div>
+    -->
+    <div class="form-group">
+      <label class="form-label">Файлы</label>
+      <div class="file-drop" id="file-drop" onclick="document.getElementById('hw-files').click()">
+        📎 Нажми или перетащи файлы сюда
+        <input type="file" id="hw-files" multiple style="display:none" onchange="HWModal.handleFiles(this.files)"/>
+      </div>
+      <div id="file-list" class="hw-modal-file-list"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost" onclick="HWModal.close()">Отмена</button>
+      <button class="btn btn-primary" onclick="HWModal.save()">💾 Сохранить</button>
+    </div>
+  </div>
+</div>
+<div id="toast-container"></div>
+
+<script>
+const SUBJECTS=['Организация ветеринарного дела','Ветеринарная токсикология','Акушерство и гинекология животных','Паразитология и инвазионные болезни животных','Эпизоотология и инфекционные болезни животных','Ветеринарно-санитарная экспертиза','Общая и частная хирургия','Биология и патология жвачных','Внутренние незаразные болезни животных'];
+
+const API=(()=>{
+  async function get(path,params={}){const url=new URL(path,location.origin);Object.entries(params).forEach(([k,v])=>v!=null&&url.searchParams.set(k,v));const r=await fetch(url);if(!r.ok)throw new Error(await r.text());return r.json()}
+  async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json()}
+  async function put(path,data){const r=await fetch(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json()}
+  async function del(path){const r=await fetch(path,{method:'DELETE'});if(!r.ok)throw new Error(await r.text())}
+  async function upload(path,file){const fd=new FormData();fd.append('file',file);const r=await fetch(path,{method:'POST',body:fd});if(!r.ok)throw new Error(await r.text());return r.json()}
+  return{get,post,put,del,upload}
+})();
+
+/** Статусы ДЗ: поставь true и раскомментируй блоки «Статус» в HTML выше */
+const HW_STATUS_ENABLED=false;
+/** Код для добавления / правки / удаления заданий и вложений */
+const HW_EDITOR_CODE='0801';
+function ensureEditorCode(){
+  try{if(sessionStorage.getItem('vs_hw_code')===HW_EDITOR_CODE)return true}catch(_){}
+  const code=prompt('Введите код, чтобы добавлять или изменять задания:');
+  if(code===HW_EDITOR_CODE){try{sessionStorage.setItem('vs_hw_code',HW_EDITOR_CODE)}catch(_){};return true}
+  if(code!==null)toast('Неверный код','error');
+  return false;
+}
+
+function toast(msg,type='info',dur=3500){const el=document.createElement('div');el.className=`toast ${type}`;el.innerHTML=`<span>${msg}</span>`;document.getElementById('toast-container').appendChild(el);setTimeout(()=>{el.style.animation='fadeOut .3s ease forwards';setTimeout(()=>el.remove(),300)},dur)}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+/** Иконка корзины (stroke = currentColor, подходит для тёмной/светлой темы) */
+function iconTrash(cls='icon-trash'){
+  return `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6M14 11v6"/></svg>`;
+}
+function todayKey(){const d=new Date();return `${d.getDate()}/${String(d.getMonth()+1).padStart(2,'0')}`}
+function currentISOWeek(){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()+3-(d.getDay()+6)%7);const w=new Date(d.getFullYear(),0,4);return 1+Math.round(((d-w)/86400000-3+(w.getDay()+6)%7)/7)}
+function fmtDeadline(iso){if(!iso)return null;const d=new Date(iso),now=new Date(),diff=d-now;const s=d.toLocaleDateString('ru',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});const cls=diff<0?'overdue':diff<86400000*2?'soon':'';const label=diff<0?'⚠️ Просрочено':diff<3600000?`⏰ Через ${Math.round(diff/60000)} мин`:`⏰ ${s}`;return{label,cls}}
+function cleanSubject(s){return(s||'').replace(/^(л\.|лаб\.|пр\.)\s*/i,'').trim()}
+function dateKeyToISO(dk,time=''){const[d,m]=dk.split('/');let h='08',mn='00';if(time){const t=time.split('-')[0];const p=(t+'..').split('.');h=p[0]||'08';mn=p[1]||'00'}return `2026-${m.padStart(2,'0')}-${d.padStart(2,'0')}T${h.padStart(2,'0')}:${mn.padStart(2,'0')}`}
+/** Сокращения дня: Пн., Вт., … — только для коротких подписей; заголовки дня оставляем полными */
+function abbrDayNameRu(full){
+  if(!full)return'';
+  const m={понедельник:'Пн.',вторник:'Вт.',среда:'Ср.',четверг:'Чт.',пятница:'Пт.',суббота:'Сб.',воскресенье:'Вс.'};
+  const k=String(full).trim().toLowerCase();
+  return m[k]||String(full).trim();
+}
+function skGroupsHtml(){
+  return '<div class="sk-groups" role="status" aria-live="polite" aria-label="Загрузка">'+Array.from({length:6},()=>'<div class="sk-g-card"></div>').join('')+'</div>';
+}
+function skHwListHtml(){
+  const row='<div class="sk-hw-row"><div class="sk-hw-dot"></div><div class="sk-hw-body"><div class="sk-line w-88"></div><div class="sk-line w-55"></div></div></div>';
+  return '<div class="sk-hw-wrap" role="status" aria-live="polite" aria-label="Загрузка">'+row+row+row+'</div>';
+}
+function skLessonHwMiniHtml(){
+  const row='<div class="sk-hw-row"><div class="sk-hw-dot"></div><div class="sk-hw-body"><div class="sk-line w-88"></div><div class="sk-line w-55"></div></div></div>';
+  return '<div class="sk-hw-wrap" style="min-height:72px;padding:0" role="status" aria-label="Загрузка">'+row+'</div>';
+}
+
+const App=(()=>{
+  let state={group:null,weekNum:currentISOWeek(),tab:'schedule',theme:'dark',allWeeks:[]};
+  function saveState(){localStorage.setItem('vs_state',JSON.stringify({group:state.group,theme:state.theme}))}
+  function loadState(){try{Object.assign(state,JSON.parse(localStorage.getItem('vs_state')||'{}'))}catch{}}
+  function setTheme(t){state.theme=t;document.documentElement.setAttribute('data-theme',t);document.getElementById('theme-btn').textContent=t==='dark'?'☀️':'🌙';saveState()}
+  function toggleTheme(){setTheme(state.theme==='dark'?'light':'dark')}
+  function showPicker(){document.getElementById('page-picker').style.display='';document.getElementById('page-schedule').style.display='none';loadGroups()}
+  function showSchedule(){document.getElementById('page-picker').style.display='none';document.getElementById('page-schedule').style.display='';document.getElementById('header-group-name').textContent=state.group}
+  async function loadGroups(){const grid=document.getElementById('groups-grid');grid.innerHTML=skGroupsHtml();try{const data=await API.get('/api/groups');grid.innerHTML='';data.groups.forEach(g=>{const c=document.createElement('div');c.className='group-card animate-in';c.textContent=g;c.onclick=()=>selectGroup(g);grid.appendChild(c)})}catch(e){grid.innerHTML=`<div style="color:var(--text2)">Ошибка: ${e.message}</div>`}}
+  async function selectGroup(g){state.group=g;saveState();state.allWeeks=[];showSchedule();try{const data=await API.get(`/api/schedule/${encodeURIComponent(g)}`);state.allWeeks=data.weeks||[]}catch(e){toast('Ошибка загрузки: '+e.message,'error')}const today=currentISOWeek(),avail=state.allWeeks.map(w=>w.week);state.weekNum=avail.includes(today)?today:(avail[0]||today);renderWeek();setTab(state.tab)}
+  function setTab(tab){state.tab=tab;document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['schedule','hw'][i]===tab));document.getElementById('view-schedule').style.display=tab==='schedule'?'':'none';document.getElementById('view-hw').style.display=tab==='hw'?'':'none';if(tab==='hw')HW.load()}
+  function classifyLesson(s){s=(s||'').toLowerCase().trim();if(s.startsWith('л.')||s.startsWith('л '))return'lecture';if(s.startsWith('лаб.')||s.startsWith('лаб '))return'lab';if(s.startsWith('пр.')||s.startsWith('пр '))return'practical';return'other'}
+  function suffix(n){return n===1?'а':n>=2&&n<=4?'ы':''}
+  function renderLesson(ls,dayDate,idx){
+    const type=classifyLesson(ls.subject);
+    const labels={lecture:'Лекция',lab:'Лабораторная',practical:'Практика',other:'Занятие'};
+    const clean=cleanSubject(ls.subject);
+    const uid=`${dayDate.replace(/\//g,'_')}_${idx}`;
+    const deadline=dateKeyToISO(dayDate,ls.time);
+    const cleanE=clean.replace(/'/g,"&#39;");
+    return `<div class="lesson ${type}" id="lesson-${uid}">
+      <div class="lesson-main" onclick="LessonHW.toggle('${uid}','${cleanE}')">
+        <div class="lesson-time">${esc(ls.time)}</div>
+        <div class="lesson-body">
+          <span class="lesson-type-badge">${labels[type]}</span>
+          <div class="lesson-subject">${esc(clean)}</div>
+          <div class="lesson-meta">
+            ${ls.teacher?`<span>👤 ${esc(ls.teacher)}</span>`:''}
+            ${ls.room?`<span>🏛 ${esc(ls.room)}</span>`:''}
+            <span class="lesson-hw-count" id="hwc-${uid}"></span>
+          </div>
+        </div>
+      </div>
+      <div class="lesson-hw-panel" id="hwp-${uid}">
+        <div class="lesson-hw-panel-title">📋 Домашние задания по предмету</div>
+        <p class="lesson-hw-code-hint">Добавление и изменение — по коду.</p>
+        <div class="lesson-hw-mini" id="hwm-${uid}"><div class="lesson-hw-panel-empty">Загрузка…</div></div>
+        <button class="lesson-hw-panel-add" onclick="HWModal.openFromLesson('${cleanE}','${deadline}')">+ Добавить ДЗ</button>
+      </div>
+    </div>`;
+  }
+  function renderWeek(){
+    const week=state.allWeeks.find(w=>w.week===state.weekNum);
+    const title=document.getElementById('week-title');
+    if(!week){title.innerHTML=`Нет данных для недели ${state.weekNum} <small>Нет занятий</small>`;document.getElementById('days-container').innerHTML='<div class="empty"><div class="empty-icon">📭</div><h3>Занятий нет</h3><p>На этой неделе расписание не найдено</p></div>';return}
+    title.innerHTML=`Неделя ${week.week} <small>${week.date_range}</small>`;
+    const tk=todayKey(),container=document.getElementById('days-container');
+    const isTodayWeek=state.weekNum===currentISOWeek();
+    const hasTodayInWeek=isTodayWeek&&week.days.some(d=>d.date===tk);
+    container.innerHTML='';
+    week.days.forEach((day,idx)=>{
+      const isToday=day.date===tk;
+      const collapsedClass=hasTodayInWeek&&!isToday?' collapsed':'';
+      const el=document.createElement('div');
+      el.className=`day-card animate-in${isToday?' is-today':''}${collapsedClass}`;
+      el.style.animationDelay=`${idx*0.06}s`;
+      el.innerHTML=`<div class="day-header" onclick="App.toggleDay(this.parentElement)"><span class="day-label">${day.day_name}</span><span class="day-date">${day.date}</span><span class="day-count">${day.lessons.length} пар${suffix(day.lessons.length)}</span><span class="day-toggle">▾</span></div><div class="day-lessons">${day.lessons.map((ls,i)=>renderLesson(ls,day.date,i)).join('')}</div>`;
+      container.appendChild(el);
+    });
+    LessonHW.loadCounts();
+  }
+  function toggleDay(card){card.classList.toggle('collapsed')}
+  function prevWeek(){const ws=state.allWeeks.map(w=>w.week).sort((a,b)=>a-b),i=ws.indexOf(state.weekNum);if(i>0){state.weekNum=ws[i-1];renderWeek()}else toast('Это первая неделя расписания','info')}
+  function nextWeek(){const ws=state.allWeeks.map(w=>w.week).sort((a,b)=>a-b),i=ws.indexOf(state.weekNum);if(i<ws.length-1){state.weekNum=ws[i+1];renderWeek()}else toast('Это последняя неделя расписания','info')}
+  function goToday(){const t=currentISOWeek();if(state.allWeeks.find(w=>w.week===t)){state.weekNum=t;renderWeek()}else toast('Текущая неделя не найдена','info')}
+  async function init(){loadState();setTheme(state.theme);if(state.group)await selectGroup(state.group);else showPicker()}
+  return{init,showPicker,toggleTheme,setTab,toggleDay,prevWeek,nextWeek,goToday,get group(){return state.group},get allWeeks(){return state.allWeeks}}
+})();
+
+const LessonHW=(()=>{
+  async function loadCounts(){
+    const group=App.group;if(!group)return;
+    try{
+      const data=await API.get('/api/homework',{group});
+      const counts={};
+      (data.homework||[]).forEach(hw=>{
+        if(HW_STATUS_ENABLED&&hw.status==='done')return;
+        const k=cleanSubject(hw.subject);counts[k]=(counts[k]||0)+1;
+      });
+      document.querySelectorAll('[id^="hwc-"]').forEach(badge=>{
+        const uid=badge.id.slice(4);
+        const lesson=document.getElementById(`lesson-${uid}`);if(!lesson)return;
+        const subjEl=lesson.querySelector('.lesson-subject');if(!subjEl)return;
+        const subj=subjEl.textContent.trim();
+        const cnt=counts[subj]||0;
+        if(cnt>0){badge.textContent=`${cnt} ДЗ`;badge.classList.add('visible')}else{badge.classList.remove('visible')}
+      });
+    }catch{}
+  }
+  async function toggle(uid,subject){
+    const panel=document.getElementById(`hwp-${uid}`);if(!panel)return;
+    const isOpen=panel.classList.contains('open');
+    if(isOpen){panel.classList.remove('open');return}
+    panel.classList.add('open');
+    await loadForPanel(uid,subject);
+  }
+  async function loadForPanel(uid,subject){
+    const mini=document.getElementById(`hwm-${uid}`);if(!mini)return;
+    mini.innerHTML=skLessonHwMiniHtml();
+    try{
+      const data=await API.get('/api/homework',{group:App.group});
+      const subNorm=cleanSubject(subject);
+      const items=(data.homework||[]).filter(hw=>cleanSubject(hw.subject)===subNorm);
+      if(!items.length){mini.innerHTML='<div class="lesson-hw-panel-empty">Домашних заданий нет. Добавьте кнопкой ниже.</div>';return}
+      mini.innerHTML=items.map(hw=>{
+        const dl=hw.deadline?fmtDeadline(hw.deadline):null;
+        const subjE=hw.subject.replace(/'/g,"&#39;");
+        const descBlock=hw.description?`<div class="lesson-hw-mini-desc">${esc(hw.description)}</div>`:'';
+        const fl=(hw.files||[]).length?(hw.files||[]).map(f=>`<a href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📎 ${esc(f.filename)}</a>`).join(''):'<span class="lesson-hw-mini-files-empty">Нет вложений</span>';
+        return `<div class="lesson-hw-mini-item" id="lhwi-${hw.id}">
+          <div class="lesson-hw-mini-top" onclick="LessonHW.toggleMini(event,this)">
+            <div class="lesson-hw-mini-dot ${HW_STATUS_ENABLED?hw.status:'neutral'}"></div>
+            <span class="lesson-hw-mini-subject">${esc(hw.subject)}</span>
+            ${dl?`<span class="lesson-hw-mini-dl ${dl.cls}">${dl.label}</span>`:''}
+            ${HW_STATUS_ENABLED&&hw.status!=='done'?`<button type="button" class="lesson-hw-mini-done" onclick="event.stopPropagation();LessonHW.markDone(${hw.id},'${uid}','${subjE}')">✅</button>`:''}
+            <span class="lesson-hw-mini-chev">▾</span>
+          </div>
+          <div class="lesson-hw-mini-detail" onclick="event.stopPropagation()">
+            ${descBlock}
+            <div class="lesson-hw-mini-files">${fl}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }catch(e){mini.innerHTML=`<div class="lesson-hw-panel-empty">Ошибка: ${e.message}</div>`}
+  }
+  function toggleMini(ev,top){if(ev.target.closest('.lesson-hw-mini-done'))return;const row=top.parentElement;if(row)row.classList.toggle('expanded')}
+  async function markDone(id,uid,subject){
+    if(!HW_STATUS_ENABLED)return;
+    try{await API.put(`/api/homework/${id}`,{status:'done'});toast('✅ Выполнено!','success',1500);await loadForPanel(uid,cleanSubject(subject));loadCounts();if(document.getElementById('view-hw').style.display!=='none')HW.load()}
+    catch(e){toast('Ошибка: '+e.message,'error')}
+  }
+  return{toggle,loadCounts,markDone,toggleMini}
+})();
+
+const HW=(()=>{
+  let statusFilter='all',subjectFilter=null;
+  function setStatusFilter(f){
+    if(!HW_STATUS_ENABLED)return;
+    statusFilter=f;
+    const box=document.getElementById('hw-status-filters');
+    if(box)box.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));
+    load();
+  }
+  function setSubjectFilter(s){subjectFilter=subjectFilter===s?null:s;document.querySelectorAll('#hw-subj-filters .subj-filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.subj===s&&subjectFilter!==null));load()}
+  function statusLabel(s){if(!HW_STATUS_ENABLED)return'';return{pending:'🔴 Не сделано',in_progress:'🟡 В процессе',done:'✅ Сдано'}[s]||s}
+  function buildSubjectFilters(items){
+    const subjects=[...new Set(items.map(h=>h.subject))].sort();
+    const section=document.getElementById('hw-subj-section'),container=document.getElementById('hw-subj-filters');
+    if(!subjects.length){section.style.display='none';return}
+    section.style.display='';
+    container.innerHTML=subjects.map(s=>`<button class="subj-filter-btn${subjectFilter===s?' active':''}" data-subj="${esc(s)}" onclick="HW.setSubjectFilter('${s.replace(/'/g,"\\'")}')">${esc(s)}</button>`).join('');
+  }
+  function hwDeadlinePassed(iso){
+    if(!iso)return false;
+    const t=Date.parse(iso);
+    return !Number.isNaN(t)&&t<Date.now();
+  }
+  function hwCardHtml(hw,isPast){
+    const pastCls=isPast?' hw-item--past':'';
+    const dl=hw.deadline?fmtDeadline(hw.deadline):null;
+    const files=(hw.files||[]).map(f=>`<a class="hw-file-badge" href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a>`).join('');
+    const fileBlock=files?`<div class="hw-detail-files">${files}</div>`:'<div class="hw-detail-files"><span class="hw-detail-empty">Нет прикреплённых файлов</span></div>';
+    const stLabel=statusLabel(hw.status);
+    const metaExtra=stLabel?`<span>${stLabel}</span>`:'';
+    const statusBtns=HW_STATUS_ENABLED
+      ?(`${hw.status!=='done'?`<button class="hw-act-btn primary" onclick="HW.markDone(${hw.id})">✅ Выполнено</button>`:''}
+          ${hw.status==='pending'?`<button class="hw-act-btn" onclick="HW.markProgress(${hw.id})">🟡 В процессе</button>`:''}`)
+      :'';
+    return `<div class="hw-item animate-in${pastCls}" id="hw-${hw.id}">
+      <div class="hw-status-dot ${HW_STATUS_ENABLED?hw.status:'neutral'}"></div>
+      <div class="hw-body">
+        <div class="hw-summary" onclick="HW.toggleExpand(${hw.id},event)">
+          <div class="hw-summary-inner">
+            <div class="hw-subject">${esc(hw.subject)}</div>
+            ${hw.description?`<div class="hw-desc">${esc(hw.description)}</div>`:''}
+            <div class="hw-meta">${dl?`<span class="hw-deadline ${dl.cls}">${dl.label}</span>`:''}${metaExtra}</div>
+          </div>
+          <span class="hw-expand-icon">▾</span>
+        </div>
+        <div class="hw-files-expand">${fileBlock}</div>
+        <div class="hw-actions" onclick="event.stopPropagation()">
+          ${statusBtns}
+          <button class="hw-act-btn" onclick="HWModal.openEdit(${hw.id})">✏️</button>
+          <button type="button" class="hw-act-btn hw-act-btn--icon danger" title="Удалить задание" onclick="HW.del(${hw.id})">${iconTrash()}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function forgetCode(){
+    try{sessionStorage.removeItem('vs_hw_code')}catch(_){}
+    toast('Код сброшен. При следующем действии с заданием он запросится снова.','info',4000);
+  }
+  async function load(){
+    const group=App.group;if(!group)return;
+    const list=document.getElementById('hw-list');list.innerHTML=skHwListHtml();
+    try{
+      const params={group};
+      if(HW_STATUS_ENABLED&&statusFilter!=='all')params.status=statusFilter;
+      const data=await API.get('/api/homework',params);
+      let items=data.homework||[];buildSubjectFilters(items);
+      if(subjectFilter)items=items.filter(h=>h.subject===subjectFilter);
+      render(items);
+    }catch(e){list.innerHTML=`<div style="color:var(--text2);padding:20px">Ошибка: ${e.message}</div>`}
+  }
+  function render(items){
+    const list=document.getElementById('hw-list');
+    if(!items.length){
+      const msg=HW_STATUS_ENABLED
+        ?({all:'Заданий пока нет',pending:'Всё выполнено! 🎉',in_progress:'Нет активных заданий',done:'Ещё ничего не сдано'}[statusFilter]||'Ничего не найдено')
+        :'Заданий пока нет';
+      list.innerHTML=`<div class="hw-empty"><div class="hw-empty-icon">📚</div><h3>${msg}</h3><p>Добавьте задание кнопкой выше</p></div>`;
+      return;
+    }
+    const upcoming=[],past=[];
+    for(const hw of items){
+      if(hwDeadlinePassed(hw.deadline))past.push(hw);
+      else upcoming.push(hw);
+    }
+    past.sort((a,b)=>{const da=a.deadline?Date.parse(a.deadline):0;const db=b.deadline?Date.parse(b.deadline):0;return db-da});
+    let html='';
+    html+=`<div class="hw-section"><h3 class="hw-section-title">Актуальные</h3>`;
+    if(upcoming.length){
+      html+=`<div class="hw-stack">${upcoming.map(h=>hwCardHtml(h,false)).join('')}</div>`;
+    }else{
+      html+=`<div class="hw-empty hw-empty--compact"><h3>Нет актуальных заданий</h3><p>${past.length?'Все с дедлайном уже в прошлом — открой блок «Прошедшие» ниже.':'Добавьте задание кнопкой выше.'}</p></div>`;
+    }
+    html+=`</div>`;
+    if(past.length){
+      html+=`<details class="hw-past-details"><summary>Прошедшие по дедлайну <span style="opacity:.85;font-weight:500">(${past.length})</span></summary><div class="hw-past-inner hw-stack">${past.map(h=>hwCardHtml(h,true)).join('')}</div></details>`;
+    }
+    list.innerHTML=html;
+  }
+  function toggleExpand(id,ev){if(ev&&ev.target.closest('.hw-act-btn'))return;document.getElementById('hw-'+id)?.classList.toggle('expanded')}
+  async function markDone(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}`,{status:'done'});toast('✅ Выполнено!','success');load();LessonHW.loadCounts()}catch(e){toast('Ошибка: '+e.message,'error')}}
+  async function markProgress(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}`,{status:'in_progress'});load()}catch(e){toast('Ошибка: '+e.message,'error')}}
+  async function del(id){if(!ensureEditorCode())return;if(!confirm('Удалить это задание?'))return;try{await API.del(`/api/homework/${id}`);toast('Задание удалено','info');load();LessonHW.loadCounts()}catch(e){toast('Ошибка: '+e.message,'error')}}
+  return{load,setStatusFilter,setSubjectFilter,markDone,markProgress,del,toggleExpand,forgetCode}
+})();
+
+const HWModal=(()=>{
+  let editId=null,pendingFiles=[],attachedFiles=[],acFocusIdx=-1;
+  function $id(id){return document.getElementById(id)}
+  function renderFileList(){
+    const el=$id('file-list');if(!el)return;
+    let html='';
+    attachedFiles.forEach(f=>{
+      html+=`<div class="hw-file-row"><a href="/api/files/${f.id}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a><button type="button" class="hw-file-row-remove" onclick="HWModal.removeServerFile(${f.id})" title="Удалить">${iconTrash('icon-trash icon-trash--sm')}</button></div>`;
+    });
+    pendingFiles.forEach((f,i)=>{
+      html+=`<div class="hw-file-row"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><button type="button" class="hw-file-row-remove" onclick="HWModal.removePendingFile(${i})" title="Убрать из списка">${iconTrash('icon-trash icon-trash--sm')}</button></div>`;
+    });
+    el.innerHTML=html;
+  }
+  async function removeServerFile(fileId){
+    if(!editId)return;
+    if(!ensureEditorCode())return;
+    try{
+      await API.del(`/api/homework/${editId}/files/${fileId}`);
+      attachedFiles=attachedFiles.filter(f=>f.id!==fileId);
+      renderFileList();
+      toast('Файл удалён','info',2200);
+      HW.load();LessonHW.loadCounts();
+    }catch(e){toast('Ошибка: '+e.message,'error')}
+  }
+  function removePendingFile(idx){
+    pendingFiles.splice(idx,1);
+    renderFileList();
+  }
+  function resetForm(){$id('hw-subject').value='';$id('hw-desc').value='';$id('hw-deadline').value='';const st=$id('hw-status');if(st)st.value='pending';$id('date-suggestions').innerHTML='';closeDropdown();pendingFiles=[];attachedFiles=[];acFocusIdx=-1;renderFileList()}
+  function open(){if(!ensureEditorCode())return;editId=null;resetForm();$id('hw-modal-title').textContent='Добавить задание';show()}
+  function openFromLesson(subject,deadline){if(!ensureEditorCode())return;editId=null;resetForm();$id('hw-modal-title').textContent='Добавить задание';$id('hw-subject').value=subject;$id('hw-deadline').value=deadline;updateDateSuggestions(subject);show()}
+  async function openEdit(id){if(!ensureEditorCode())return;editId=id;pendingFiles=[];attachedFiles=[];try{const hw=await API.get(`/api/homework/${id}`);$id('hw-modal-title').textContent='Редактировать задание';$id('hw-subject').value=hw.subject||'';$id('hw-desc').value=hw.description||'';$id('hw-deadline').value=hw.deadline?hw.deadline.slice(0,16):'';const st=$id('hw-status');if(st)st.value=hw.status||'pending';attachedFiles=[...(hw.files||[])];renderFileList();updateDateSuggestions(hw.subject||'');show()}catch(e){editId=null;toast('Ошибка загрузки','error')}}
+  function show(){$id('hw-modal-overlay').classList.add('open');setTimeout(()=>$id('hw-subject').focus(),80)}
+  function close(){$id('hw-modal-overlay').classList.remove('open');closeDropdown()}
+  function bgClose(e){if(e.target.id==='hw-modal-overlay')close()}
+  function highlight(text,query){if(!query)return esc(text);const re=new RegExp('('+query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');return esc(text).replace(re,'<b>$1</b>')}
+  function onSubjectInput(input){
+    const val=input.value.trim();const dropdown=$id('ac-dropdown');
+    let candidates=val?SUBJECTS.filter(s=>s.toLowerCase().includes(val.toLowerCase())):SUBJECTS.slice();
+    if(val&&!SUBJECTS.find(s=>s.toLowerCase()===val.toLowerCase())&&val.length>2)candidates.push(val);
+    if(!candidates.length){closeDropdown();return}
+    acFocusIdx=-1;
+    dropdown.innerHTML=candidates.map((s,i)=>{
+      const isCustom=!SUBJECTS.includes(s);
+      const lo=val.toLowerCase();
+      const highlighted=isCustom?`✏️ Использовать: <b>${esc(s)}</b>`:esc(s).replace(new RegExp('('+lo.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<b>$1</b>');
+      return `<div class="ac-item" data-idx="${i}" data-val="${esc(s)}" onclick="HWModal.selectSubject('${s.replace(/'/g,"&#39;")}')">${highlighted}</div>`;
+    }).join('');
+    dropdown.classList.add('open');
+  }
+  function onSubjectKey(e){
+    const dropdown=$id('ac-dropdown');const items=[...dropdown.querySelectorAll('.ac-item')];
+    if(e.key==='ArrowDown'){e.preventDefault();acFocusIdx=Math.min(acFocusIdx+1,items.length-1);items.forEach((el,i)=>el.classList.toggle('focused',i===acFocusIdx));if(acFocusIdx>=0)items[acFocusIdx].scrollIntoView({block:'nearest'})}
+    else if(e.key==='ArrowUp'){e.preventDefault();acFocusIdx=Math.max(acFocusIdx-1,-1);items.forEach((el,i)=>el.classList.toggle('focused',i===acFocusIdx))}
+    else if(e.key==='Enter'&&acFocusIdx>=0){e.preventDefault();selectSubject(items[acFocusIdx].dataset.val)}
+    else if(e.key==='Escape'){closeDropdown()}
+  }
+  function selectSubject(val){$id('hw-subject').value=val;closeDropdown();updateDateSuggestions(val)}
+  function closeDropdown(){$id('ac-dropdown').classList.remove('open');$id('ac-dropdown').innerHTML='';acFocusIdx=-1}
+  function updateDateSuggestions(subject){
+    const container=$id('date-suggestions');container.innerHTML='';if(!subject)return;
+    const lo=subject.toLowerCase();const now=new Date();now.setHours(0,0,0,0);
+    const suggestions=[];
+    for(const week of App.allWeeks){
+      for(const day of week.days){
+        for(const ls of day.lessons){
+          const c=cleanSubject(ls.subject).toLowerCase();
+          if(c.includes(lo.slice(0,10))||lo.includes(c.slice(0,10))){
+            const[d,m]=day.date.split('/');const dt=new Date(2026,parseInt(m)-1,parseInt(d));
+            if(dt>=now&&suggestions.length<6){suggestions.push({dateKey:day.date,dayName:day.day_name,time:ls.time})}
+          }
+        }
+      }
+    }
+    if(!suggestions.length)return;
+    container.innerHTML=suggestions.map(s=>{
+      const iso=dateKeyToISO(s.dateKey,s.time);
+      return `<button class="date-chip" data-iso="${iso}" onclick="HWModal.pickDate('${iso}',this)" title="${esc(s.dayName)}, ${s.dateKey} — ${s.time}">📅 ${abbrDayNameRu(s.dayName)} ${s.dateKey}</button>`;
+    }).join('');
+  }
+  function pickDate(iso,btn){$id('hw-deadline').value=iso;document.querySelectorAll('.date-chip').forEach(c=>c.classList.remove('selected'));btn.classList.add('selected')}
+  function handleFiles(files){pendingFiles=[...pendingFiles,...files];renderFileList()}
+  async function save(){
+    if(!ensureEditorCode())return;
+    const subject=$id('hw-subject').value.trim();if(!subject){toast('Введите предмет','error');return}
+    const body={group_name:App.group,subject,description:$id('hw-desc').value.trim()||null,deadline:$id('hw-deadline').value||null};
+    const stEl=$id('hw-status');
+    if(HW_STATUS_ENABLED&&stEl)body.status=stEl.value;
+    try{
+      let hw;
+      if(editId){hw=await API.put(`/api/homework/${editId}`,body);toast('✅ Задание обновлено!','success')}
+      else{hw=await API.post('/api/homework',body);toast('✅ Задание добавлено!','success')}
+      for(const f of pendingFiles){try{await API.upload(`/api/homework/${hw.id}/files`,f)}catch(e){toast('Файл не загружен: '+f.name,'error')}}
+      close();HW.load();LessonHW.loadCounts();
+    }catch(e){toast('Ошибка: '+e.message,'error')}
+  }
+  document.addEventListener('DOMContentLoaded',()=>{
+    const zone=$id('file-drop');
+    if(zone){zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag')});zone.addEventListener('dragleave',()=>zone.classList.remove('drag'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');handleFiles(e.dataTransfer.files)})}
+    document.addEventListener('click',e=>{if(!$id('ac-wrap').contains(e.target))closeDropdown()});
+  });
+  return{open,openFromLesson,openEdit,close,bgClose,handleFiles,save,onSubjectInput,onSubjectKey,selectSubject,pickDate,removeServerFile,removePendingFile}
+})();
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')HWModal.close();
+  if(e.key==='ArrowLeft'&&!e.target.matches('input,textarea,select'))App.prevWeek();
+  if(e.key==='ArrowRight'&&!e.target.matches('input,textarea,select'))App.nextWeek();
+});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').then(reg=>{
+    reg.addEventListener('updatefound',()=>{
+      const w=reg.installing;
+      if(!w)return;
+      w.addEventListener('statechange',()=>{
+        if(w.state==='installed'&&navigator.serviceWorker.controller)
+          console.info('VetSchedule: доступно обновление — обновите вкладку.');
+      });
+    });
+  }).catch(()=>{});
+}
+document.addEventListener('DOMContentLoaded',()=>App.init());
+</script>
+</body>
+</html>
