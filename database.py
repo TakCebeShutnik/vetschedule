@@ -4,19 +4,33 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.pool import NullPool
 from datetime import datetime
-from config import config
 
-_is_sqlite = "sqlite" in config.DATABASE_URL.lower()
-_engine_kw: dict = {"echo": False}
-if _is_sqlite:
-    _engine_kw["connect_args"] = {"check_same_thread": False}
-else:
-    # Serverless (Vercel): без пула соединений, живые коннекты к Neon/Postgres
-    _engine_kw["poolclass"] = NullPool
-    _engine_kw["pool_pre_ping"] = True
+_engine = None
+_SessionLocal = None
 
-engine = create_engine(config.DATABASE_URL, **_engine_kw)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def _get_database_url() -> str:
+    from config import config
+    return config.DATABASE_URL
+
+
+def _get_engine():
+    global _engine, _SessionLocal
+    if _engine is not None:
+        return _engine
+    url = _get_database_url()
+    _is_sqlite = "sqlite" in url.lower()
+    kw: dict = {"echo": False}
+    if _is_sqlite:
+        kw["connect_args"] = {"check_same_thread": False}
+    else:
+        kw["poolclass"] = NullPool
+        kw["pool_pre_ping"] = True
+    _engine = create_engine(url, **kw)
+    _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+    return _engine
+
+
 Base = declarative_base()
 
 
@@ -79,11 +93,12 @@ def _ensure_hw_file_columns() -> None:
     """Добавляет file_data / content_type в существующую БД (без потери данных)."""
     from sqlalchemy import inspect, text
 
+    engine = _get_engine()
     insp = inspect(engine)
     if not insp.has_table("homework_files"):
         return
     cols = {c["name"] for c in insp.get_columns("homework_files")}
-    blob = "BLOB" if _is_sqlite else "BYTEA"
+    blob = "BLOB" if "sqlite" in _get_database_url().lower() else "BYTEA"
     with engine.begin() as conn:
         if "file_data" not in cols:
             conn.execute(text(f"ALTER TABLE homework_files ADD COLUMN file_data {blob}"))
@@ -94,8 +109,17 @@ def _ensure_hw_file_columns() -> None:
 
 
 def init_db():
+    engine = _get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_hw_file_columns()
+
+
+def SessionLocal():
+    """Совместимость с bot.py и прочим кодом вне FastAPI Depends."""
+    global _SessionLocal
+    if _SessionLocal is None:
+        _get_engine()
+    return _SessionLocal()
 
 
 def get_db():

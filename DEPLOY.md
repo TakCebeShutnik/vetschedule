@@ -81,9 +81,10 @@ Workflow `.github/workflows/update-schedule.yml` обновляет `schedule_js
 **Вариант A — Neon (бесплатно, проще всего)**
 
 1. [neon.tech](https://neon.tech) → проект → скопируйте **Connection string** (PostgreSQL).
-2. Vercel → проект → **Settings** → **Environment Variables**:
-   - `DATABASE_URL` = `postgresql://...` (из Neon; код сам приведёт к нужному виду).
-3. Redeploy.
+2. Vercel → **Settings** → **Environment Variables** — после Connect появятся переменные Neon, например:
+   - `STORAGE_POSTGRES_URL_DATABASE_URL` (код подхватит сам)
+   - или вручную: `DATABASE_URL` = connection string из Neon
+3. **Redeploy** (обязательно после появления переменных).
 
 **Вариант B — Vercel Postgres**
 
@@ -154,6 +155,7 @@ python run.py
 
 | Симптом | Решение |
 |---------|---------|
+| **500**, `could not import main.py`, «нужна постоянная БД» | Storage → Neon подключён к проекту → **Redeploy**. Либо вручную: `DATABASE_URL` = строка из `STORAGE_POSTGRES_URL_DATABASE_URL` |
 | Сайт есть, API 404 | Убрать **Output Directory = static**, пресет FastAPI |
 | Failed to fetch | Деплой не прошёл / нет `/api/groups` |
 | Бот молчит | Вызвать `setup-webhook`, проверить `TELEGRAM_TOKEN` и `SITE_URL` |
