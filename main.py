@@ -22,6 +22,7 @@ from config import config
 from database import init_db, get_db, Homework, HomeworkFile, User
 from lesson_overrides import apply_to_weeks, apply_to_day, toggle_override
 from schedule_utils import load_group, list_groups, get_week, classify_lesson
+from file_storage import save_homework_file, file_download_response, delete_homework_file
 
 # ─── Инициализация ───────────────────────────────────────────────────────────
 
@@ -281,24 +282,19 @@ async def api_hw_upload(hw_id: int, file: UploadFile = File(...), db: Session = 
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
-    ext = Path(file.filename).suffix
-    fname = f"{uuid.uuid4()}{ext}"
-    dest = config.UPLOADS_DIR / fname
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    hf = HomeworkFile(hw_id=hw_id, filename=file.filename, filepath=str(dest))
-    db.add(hf)
-    db.commit()
-    db.refresh(hf)
+    hf = await save_homework_file(db, hw_id, file)
     return {"id": hf.id, "filename": hf.filename, "url": f"/api/files/{hf.id}"}
 
 
 @app.get("/api/files/{file_id}")
 def api_file_download(file_id: int, db: Session = Depends(get_db)):
     hf = db.get(HomeworkFile, file_id)
-    if not hf or not Path(hf.filepath).exists():
+    if not hf:
         raise HTTPException(404, "Файл не найден")
-    return FileResponse(hf.filepath, filename=hf.filename)
+    try:
+        return file_download_response(hf)
+    except FileNotFoundError:
+        raise HTTPException(404, "Файл не найден")
 
 
 @app.delete("/api/homework/{hw_id}/files/{file_id}", status_code=204)
@@ -306,12 +302,7 @@ def api_hw_file_delete(hw_id: int, file_id: int, db: Session = Depends(get_db)):
     hf = db.get(HomeworkFile, file_id)
     if not hf or hf.hw_id != hw_id:
         raise HTTPException(404, "Файл не найден")
-    p = Path(hf.filepath)
-    if p.is_file():
-        try:
-            p.unlink()
-        except OSError:
-            pass
+    delete_homework_file(hf)
     db.delete(hf)
     db.commit()
 

@@ -68,12 +68,30 @@ Workflow `.github/workflows/update-schedule.yml` обновляет `schedule_js
 | `SITE_URL` | `https://vetschedule.vercel.app` | да, ваш URL Vercel |
 | `CRON_SECRET` | длинная случайная строка | да, для setup-webhook |
 | `EDITOR_CODE` | `0801` | да (= код на сайте) |
+| `DATABASE_URL` или `POSTGRES_URL` | см. § 2.4 | **да** — без этого БД сбрасывается |
 | `TELEGRAM_MODE` | `webhook` | на Vercel ставится само |
 | `CORS_ORIGINS` | можно не задавать (`*`) | нет |
 
 **Не нужны** на Vercel: `API_PUBLIC_URL`, `API_INTERNAL_URL` (подставятся из `SITE_URL`).
 
-Опционально позже: `DATABASE_URL` = Postgres (Neon / Vercel Postgres), если нужна постоянная БД.
+### 2.4 Постоянная база данных (обязательно на Vercel)
+
+На Vercel **нельзя** хранить SQLite в `/tmp` — после перезапуска пропадут ДЗ, отмены пар и файлы.
+
+**Вариант A — Neon (бесплатно, проще всего)**
+
+1. [neon.tech](https://neon.tech) → проект → скопируйте **Connection string** (PostgreSQL).
+2. Vercel → проект → **Settings** → **Environment Variables**:
+   - `DATABASE_URL` = `postgresql://...` (из Neon; код сам приведёт к нужному виду).
+3. Redeploy.
+
+**Вариант B — Vercel Postgres**
+
+1. Vercel → проект → **Storage** → **Create Database** → Postgres.
+2. Подключите к проекту — появятся `POSTGRES_URL` (подхватится автоматически).
+3. Redeploy.
+
+Вложения к ДЗ при Postgres сохраняются **внутри БД**, не на диск.
 
 ### 2.4 Deploy
 
@@ -123,8 +141,8 @@ python run.py
 
 | Что | Как на Vercel |
 |-----|----------------|
-| SQLite | Файл в `/tmp` — данные ДЗ/отмены могут **сбрасываться** при холодном старте |
-| Файлы ДЗ | `/tmp/uploads` — то же |
+| БД | Только **Postgres** (Neon / Vercel Postgres), не SQLite |
+| Файлы ДЗ | В Postgres (`file_data`), если задан `DATABASE_URL` |
 | Напоминания ДЗ (cron в боте) | Отключены в webhook-режиме |
 | Парсер PDF | Только GitHub Actions |
 

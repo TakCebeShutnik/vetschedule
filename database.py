@@ -1,13 +1,21 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import (
+    create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, LargeBinary,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.pool import NullPool
 from datetime import datetime
 from config import config
 
-engine = create_engine(
-    config.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in config.DATABASE_URL else {},
-    echo=False,
-)
+_is_sqlite = "sqlite" in config.DATABASE_URL.lower()
+_engine_kw: dict = {"echo": False}
+if _is_sqlite:
+    _engine_kw["connect_args"] = {"check_same_thread": False}
+else:
+    # Serverless (Vercel): без пула соединений, живые коннекты к Neon/Postgres
+    _engine_kw["poolclass"] = NullPool
+    _engine_kw["pool_pre_ping"] = True
+
+engine = create_engine(config.DATABASE_URL, **_engine_kw)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -43,11 +51,13 @@ class Homework(Base):
 
 class HomeworkFile(Base):
     __tablename__ = "homework_files"
-    id       = Column(Integer, primary_key=True, index=True)
-    hw_id    = Column(Integer, ForeignKey("homework.id"))
-    filename = Column(String(255))
-    filepath = Column(String(500))
-    homework = relationship("Homework", back_populates="files")
+    id           = Column(Integer, primary_key=True, index=True)
+    hw_id        = Column(Integer, ForeignKey("homework.id"))
+    filename     = Column(String(255))
+    filepath     = Column(String(500), nullable=True)
+    file_data    = Column(LargeBinary, nullable=True)
+    content_type = Column(String(120), nullable=True, default="application/octet-stream")
+    homework     = relationship("Homework", back_populates="files")
 
 
 class LessonOverride(Base):
@@ -65,8 +75,27 @@ class LessonOverride(Base):
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+def _ensure_hw_file_columns() -> None:
+    """Добавляет file_data / content_type в существующую БД (без потери данных)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if not insp.has_table("homework_files"):
+        return
+    cols = {c["name"] for c in insp.get_columns("homework_files")}
+    blob = "BLOB" if _is_sqlite else "BYTEA"
+    with engine.begin() as conn:
+        if "file_data" not in cols:
+            conn.execute(text(f"ALTER TABLE homework_files ADD COLUMN file_data {blob}"))
+        if "content_type" not in cols:
+            conn.execute(text(
+                "ALTER TABLE homework_files ADD COLUMN content_type VARCHAR(120)"
+            ))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_hw_file_columns()
 
 
 def get_db():
