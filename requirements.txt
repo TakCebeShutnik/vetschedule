@@ -1,3 +1,4 @@
+# API + сайт + бот (Vercel и локальный сервер). Без pdf2docx — парсер в requirements-parser.txt
 python-dotenv>=1.0.0
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
@@ -9,5 +10,3 @@ apscheduler==3.10.4
 pydantic==2.7.1
 httpx==0.27.0
 requests>=2.31.0
-python-docx>=1.1.0
-pdf2docx>=0.5.6
