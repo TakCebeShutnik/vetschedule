@@ -73,16 +73,45 @@ def get_cell_text(cell) -> str:
 def parse_day_date(raw: str):
     """
     Парсит строку вида 'ВТР 7/04' или 'ПНД 11/05'.
-    Возвращает (abbr, day_str, day_num, month_num) или None.
+    Возвращает (abbr, day_n, month_n) или None.
     """
     raw = clean_text(raw)
     m = re.match(r"([А-ЯЁ]{3})\s+(\d{1,2})/(\d{2})", raw)
     if not m:
         return None
-    abbr   = m.group(1)
-    day_n  = int(m.group(2))
-    month_n = int(m.group(3))
-    return abbr, day_n, month_n
+    abbr = m.group(1)
+    return abbr, int(m.group(2)), int(m.group(3))
+
+
+TIME_SLOT_ORDER = ("09.00", "10.45", "12.30", "14.30", "16.15")
+
+
+def time_slot_index(slot: str) -> int:
+    slot = (slot or "").strip()
+    for i, prefix in enumerate(TIME_SLOT_ORDER):
+        if slot.startswith(prefix):
+            return i
+    return -1
+
+
+def should_advance_day(last_slot: str, new_slot: str) -> bool:
+    """Новый слот раньше предыдущего → следующий учебный день (после разрыва страницы)."""
+    li, ni = time_slot_index(last_slot), time_slot_index(new_slot)
+    if li < 0 or ni < 0:
+        return False
+    return ni < li
+
+
+def advance_weekday(abbr: str, day_n: int, month_n: int, year: int = 2026):
+    """Следующий учебный день (пн–пт)."""
+    try:
+        d = date(year, month_n, day_n) + timedelta(days=1)
+    except ValueError:
+        return abbr, day_n, month_n
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    abbr_by_wd = ("ПНД", "ВТР", "СРД", "ЧТВ", "ПТН", "СБТ", "ВСК")
+    return abbr_by_wd[d.weekday()], d.day, d.month
 
 
 def date_range_str(days_in_week: list, year: int = 2026) -> str:
@@ -138,12 +167,6 @@ def convert_pdf_to_docx(pdf_path: str = PDF_FILENAME,
 
 # ─── Парсинг DOCX ───────────────────────────────────────────────────────────
 
-def iter_tables(docx_path: str):
-    """Итерирует все таблицы документа."""
-    doc = Document(docx_path)
-    return doc.tables
-
-
 def find_header_row(table: Table):
     """
     Ищет строку-заголовок с 'Дни'/'Часы' и проверяет ширину таблицы.
@@ -176,65 +199,83 @@ def parse_lesson_triple(cells, base_idx: int):
     }
 
 
+def _process_row(row, state: dict, all_rows_data: list) -> None:
+    """Одна строка расписания; state: current_day_info, last_time_slot."""
+    cells = row.cells
+    if not cells:
+        return
+
+    col0 = get_cell_text(cells[0])
+    col1 = get_cell_text(cells[1]) if len(cells) > 1 else ""
+
+    parsed = parse_day_date(col0)
+    if parsed:
+        state["current_day_info"] = parsed
+        state["last_time_slot"] = None
+
+    if state["current_day_info"] is None:
+        return
+
+    time_slot = col1.strip()
+    if not re.match(r"\d{2}\.\d{2}", time_slot):
+        return
+
+    if state["last_time_slot"] and should_advance_day(state["last_time_slot"], time_slot):
+        abbr, day_n, month_n = state["current_day_info"]
+        state["current_day_info"] = advance_weekday(abbr, day_n, month_n)
+
+    abbr, day_n, month_n = state["current_day_info"]
+
+    if abbr in SKIP_DAYS:
+        state["last_time_slot"] = time_slot
+        return
+
+    full_row_text = " ".join(get_cell_text(c) for c in cells)
+    if "самостоятельн" in full_row_text.lower():
+        state["last_time_slot"] = time_slot
+        return
+
+    lessons = []
+    for g in range(GROUPS_COUNT):
+        lesson = parse_lesson_triple(cells, 2 + g * 3)
+        lessons.append(lesson)
+
+    all_rows_data.append((abbr, day_n, month_n, time_slot, lessons))
+    state["last_time_slot"] = time_slot
+
+
+def _parse_table(table: Table, all_rows_data: list, state: dict,
+                 start_idx: int = 0, scan_header: bool = False) -> None:
+    """
+    Парсит таблицу и вложенные таблицы в ячейках (после разрыва страницы в Word).
+    """
+    if scan_header:
+        hi = find_header_row(table)
+        if hi is not None:
+            start_idx = hi
+
+    for row in table.rows[start_idx:]:
+        for cell in row.cells:
+            for nested in cell.tables:
+                _parse_table(nested, all_rows_data, state, start_idx=0, scan_header=False)
+        _process_row(row, state, all_rows_data)
+
+
 def parse_tables(docx_path: str) -> list:
     """
     Главная функция парсинга.
     Возвращает список кортежей: (day_abbr, day_num, month_num, time, [lesson|None × 7])
-    Обрабатывает все таблицы документа (таблица разбита постраничными разрывами).
     """
-    tables = iter_tables(docx_path)
+    doc = Document(docx_path)
     all_rows_data = []
-    current_day_info = None  # (abbr, day_n, month_n) — сохраняется между таблицами
+    state = {"current_day_info": None, "last_time_slot": None}
 
-    for t_idx, table in enumerate(tables):
-        rows = table.rows
-
-        # Для первой таблицы пропускаем строки-заголовки
-        start_idx = 0
-        if t_idx == 0:
-            hi = find_header_row(table)
-            start_idx = hi if hi is not None else 0
-
-        for row in rows[start_idx:]:
-            cells = row.cells
-            if not cells:
-                continue
-
-            col0 = get_cell_text(cells[0])
-            col1 = get_cell_text(cells[1]) if len(cells) > 1 else ""
-
-            # Обновляем текущий день если col0 содержит день/дату
-            parsed = parse_day_date(col0)
-            if parsed:
-                current_day_info = parsed
-
-            if current_day_info is None:
-                continue
-
-            abbr, day_n, month_n = current_day_info
-
-            # Пропускаем выходные
-            if abbr in SKIP_DAYS:
-                continue
-
-            # Пропускаем строки без временно́го слота
-            time_slot = col1.strip()
-            if not re.match(r"\d{2}\.\d{2}", time_slot):
-                continue
-
-            # «День самостоятельной работы» — пропускаем
-            full_row_text = " ".join(get_cell_text(c) for c in cells)
-            if "самостоятельн" in full_row_text.lower():
-                continue
-
-            # Извлекаем данные по 7 группам (столбцы 2..22, по 3 на группу)
-            lessons = []
-            for g in range(GROUPS_COUNT):
-                base = 2 + g * 3
-                lesson = parse_lesson_triple(cells, base)
-                lessons.append(lesson)
-
-            all_rows_data.append((abbr, day_n, month_n, time_slot, lessons))
+    for t_idx, table in enumerate(doc.tables):
+        _parse_table(
+            table, all_rows_data, state,
+            start_idx=0,
+            scan_header=(t_idx == 0),
+        )
 
     return all_rows_data
 
