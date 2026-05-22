@@ -1,6 +1,10 @@
 {
   "$schema": "https://openapi.vercel.com/vercel.json",
+  "installCommand": "pip install -r requirements.txt",
   "buildCommand": "python scripts/inject_api_config.py",
-  "outputDirectory": "static",
-  "installCommand": "echo skip"
+  "functions": {
+    "main.py": {
+      "maxDuration": 60
+    }
+  }
 }

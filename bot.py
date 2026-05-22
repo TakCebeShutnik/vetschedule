@@ -1149,12 +1149,15 @@ async def send_deadline_reminders(app):
         db.close()
 
 
-# ─── Запуск ───────────────────────────────────────────────────────────────────
+# ─── Сборка Application (polling локально / webhook на Vercel) ───────────────
 
-def main():
+_ptb_app: Optional[Application] = None
+_ptb_ready = False
+
+
+def build_application() -> Application:
     if not config.TELEGRAM_TOKEN:
-        log.error("TELEGRAM_TOKEN не задан! Укажи его в .env или переменной окружения.")
-        return
+        raise RuntimeError("TELEGRAM_TOKEN не задан")
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).build()
 
@@ -1220,12 +1223,54 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_hw_view,      pattern=r"^hwv:\d+$"))
     app.add_handler(CallbackQueryHandler(cb_router,       pattern=r"^do:"))
 
-    app.job_queue.run_repeating(
-        lambda _: send_deadline_reminders(app),
-        interval=1800, first=60,
-    )
+    if config.TELEGRAM_MODE == "polling" and not config.IS_VERCEL:
+        app.job_queue.run_repeating(
+            lambda _: send_deadline_reminders(app),
+            interval=1800, first=60,
+        )
 
-    log.info("Бот запущен. Ctrl+C для остановки.")
+    return app
+
+
+async def get_ptb_application() -> Application:
+    global _ptb_app, _ptb_ready
+    if _ptb_app is None:
+        _ptb_app = build_application()
+    if not _ptb_ready:
+        await _ptb_app.initialize()
+        await _ptb_app.start()
+        _ptb_ready = True
+    return _ptb_app
+
+
+async def process_webhook_update(payload: dict) -> None:
+    ptb = await get_ptb_application()
+    update = Update.de_json(payload, ptb.bot)
+    await ptb.process_update(update)
+
+
+async def register_webhook() -> str:
+    ptb = await get_ptb_application()
+    base = config.SITE_URL.rstrip("/")
+    url = f"{base}/api/telegram/webhook"
+    await ptb.bot.set_webhook(url=url, allowed_updates=Update.ALL_TYPES)
+    log.info("Webhook установлен: %s", url)
+    return url
+
+
+def main():
+    if not config.TELEGRAM_TOKEN:
+        log.error("TELEGRAM_TOKEN не задан! Укажи его в .env или переменной окружения.")
+        return
+    if config.TELEGRAM_MODE == "webhook":
+        log.error(
+            "TELEGRAM_MODE=webhook: запускайте API (uvicorn/run.py) и вызовите "
+            "GET /api/telegram/setup-webhook?secret=CRON_SECRET"
+        )
+        return
+
+    app = build_application()
+    log.info("Бот запущен (polling). Ctrl+C для остановки.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

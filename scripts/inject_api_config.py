@@ -11,7 +11,10 @@ url = (os.environ.get("API_PUBLIC_URL") or os.environ.get("VET_API_PUBLIC_URL") 
 if url:
     body = f"window.__VET_API_BASE__={json.dumps(url)};\n"
 else:
-    body = "// Пусто = API на том же домене (локально: python run.py → http://localhost:8000)\nwindow.__VET_API_BASE__=\"\";\n"
+    body = (
+        "// API на том же домене (Vercel или локально: python run.py)\n"
+        "window.__VET_API_BASE__=\"\";\n"
+    )
 
 OUT.write_text(body, encoding="utf-8")
 print(f"Wrote {OUT} -> {url or '(same origin)'}")

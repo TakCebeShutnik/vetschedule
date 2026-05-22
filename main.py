@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,11 +30,12 @@ app = FastAPI(title="VetSchedule API", version="1.0.0")
 
 _cors_raw = (config.CORS_ORIGINS or "*").strip()
 _cors_origins = ["*"] if _cors_raw == "*" else [o.strip() for o in _cors_raw.split(",") if o.strip()]
+_cors_credentials = _cors_origins != ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -340,6 +341,36 @@ def api_user_get(telegram_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(404, "Пользователь не найден")
     return {"id": user.id, "name": user.name, "group_name": user.group_name}
+
+
+# ─── Telegram webhook (Vercel / без long-polling) ────────────────────────────
+
+def _check_cron_secret(secret: Optional[str]) -> None:
+    if not config.CRON_SECRET or secret != config.CRON_SECRET:
+        raise HTTPException(403, "Forbidden")
+
+
+@app.post("/api/telegram/webhook")
+async def api_telegram_webhook(request: Request):
+    """Точка входа для Telegram при TELEGRAM_MODE=webhook."""
+    if not config.TELEGRAM_TOKEN:
+        raise HTTPException(503, "TELEGRAM_TOKEN не задан")
+    from bot import process_webhook_update
+
+    await process_webhook_update(await request.json())
+    return {"ok": True}
+
+
+@app.get("/api/telegram/setup-webhook")
+async def api_telegram_setup_webhook(secret: str = Query(...)):
+    """Один раз после деплоя: ?secret=CRON_SECRET — привязать webhook к SITE_URL."""
+    _check_cron_secret(secret)
+    if not config.TELEGRAM_TOKEN:
+        raise HTTPException(503, "TELEGRAM_TOKEN не задан")
+    from bot import register_webhook
+
+    url = await register_webhook()
+    return {"ok": True, "webhook_url": url}
 
 
 # ─── Static / SPA ────────────────────────────────────────────────────────────

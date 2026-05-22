@@ -505,7 +505,6 @@ const API=(()=>{
     const h=location.hostname;
     const isLocal=h==='localhost'||h==='127.0.0.1';
     if(isLocal&&location.port&&location.port!=='8000')return LOCAL_API;
-    if(location.hostname.endsWith('.vercel.app')&&!ext)return '';
     return location.origin;
   }
   function apiUrl(path){
@@ -517,8 +516,6 @@ const API=(()=>{
   }
   function apiFetchHint(){
     if(location.protocol==='file:')return 'Откройте сайт через http://localhost:8000 (python run.py), а не файл с диска.';
-    if(location.hostname.endsWith('.vercel.app')&&!(window.__VET_API_BASE__||'').trim())
-      return 'На Vercel не задан API_PUBLIC_URL — укажите URL PythonAnywhere в настройках проекта и пересоберите.';
     const root=apiRoot()||LOCAL_API;
     return `Нет связи с API (${root}). Запустите сервер: python run.py`;
   }
