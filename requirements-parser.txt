@@ -1,4 +1,4 @@
 # Парсер PDF → JSON (GitHub Actions и локально: pip install -r requirements-parser.txt)
 -r requirements.txt
-python-docx>=1.1.0
-pdf2docx>=0.5.6
+python-docx
+pdf2docx
