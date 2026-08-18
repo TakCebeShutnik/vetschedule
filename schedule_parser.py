@@ -216,10 +216,9 @@ def _process_row(row, state: dict, all_rows_data: list) -> None:
     if state["current_day_info"] is None:
         return
 
-    time_match = re.match(r"(\d{2}\.\d{2}(?:-\d{2}\.\d{2})?)", col1.strip())
-    if not time_match:
+    time_slot = col1.strip()
+    if not re.match(r"\d{2}\.\d{2}", time_slot):
         return
-    time_slot = time_match.group(1)
 
     if state["last_time_slot"] and should_advance_day(state["last_time_slot"], time_slot):
         abbr, day_n, month_n = state["current_day_info"]
