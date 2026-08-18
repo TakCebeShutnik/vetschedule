@@ -3,6 +3,10 @@
 
 name: Update schedule JSON
 
+concurrency:
+  group: schedule-update
+  cancel-in-progress: true
+
 on:
   schedule:
     - cron: "0 5 * * 1"
@@ -43,4 +47,5 @@ jobs:
             exit 0
           fi
           git commit -m "chore: update schedule_json from PDF"
+          git pull --rebase -X ours origin main
           git push
