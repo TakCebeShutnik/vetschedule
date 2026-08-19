@@ -70,6 +70,24 @@ def get_cell_text(cell) -> str:
     return clean_text(" ".join(parts))
 
 
+def get_time_text(cell) -> str:
+    """
+    Текст времени: сначала прямой текст ячейки; если пусто — время
+    может лежать во вложенной таблице (pdf2docx иногда сворачивает
+    время+предмет в под-таблицу внутри ячейки). Берём первую колонку
+    первой строки вложенной таблицы.
+    """
+    txt = get_cell_text(cell)
+    if txt:
+        return txt
+    for nested in cell.tables:
+        for nrow in nested.rows:
+            first = get_cell_text(nrow.cells[0])
+            if first:
+                return first
+    return ""
+
+
 def parse_day_date(raw: str):
     """
     Парсит строку вида 'ВТР 7/04' или 'ПНД 11/05'.
