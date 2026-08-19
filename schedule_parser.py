@@ -224,7 +224,7 @@ def _process_row(row, state: dict, all_rows_data: list) -> None:
         return
 
     col0 = get_cell_text(cells[0])
-    col1 = get_cell_text(cells[1]) if len(cells) > 1 else ""
+    col1 = get_time_text(cells[1]) if len(cells) > 1 else ""
 
     parsed = parse_day_date(col0)
     if parsed:
