@@ -52,7 +52,7 @@ SUBJECTS = [
 ]
 
 # ─── Флаги (статусы ДЗ временно выключены — поставь True, чтобы вернуть) ─────
-HW_STATUS_ENABLED = False
+HW_STATUS_ENABLED = True
 HW_EDITOR_CODE = config.EDITOR_CODE
 
 # Состояния /addhw: сначала код, затем предмет → описание → дедлайн
@@ -650,7 +650,7 @@ async def hw_check_editor_code(update: Update, ctx):
             parse_mode=ParseMode.HTML,
         )
         return ConversationHandler.END
-    ctx.user_data["hw_draft"] = {"group_name": group}
+    ctx.user_data["hw_draft"] = {"group_name": group, "created_by_tg": update.effective_user.id}
     await update.message.reply_text(
         "✅ Код принят.\n"
         f"{sep_line()}\n\n"
@@ -1252,6 +1252,50 @@ async def process_webhook_update(payload: dict) -> None:
     ptb = await get_ptb_application()
     update = Update.de_json(payload, ptb.bot)
     await ptb.process_update(update)
+
+
+async def notify_new_homework(hw_id: int) -> None:
+    """Уведомляет в Telegram студентов группы о новом ДЗ. Вызывается фоново
+    из /api/homework (POST) — не блокирует ответ API. Создателю (если он
+    добавлял через бота) сообщение не дублируется — он уже видит подтверждение."""
+    if not config.TELEGRAM_TOKEN:
+        return
+    from database import SessionLocal, Homework, User
+    db = SessionLocal()
+    try:
+        hw = db.get(Homework, hw_id)
+        if not hw:
+            return
+        creator_tg = None
+        if hw.created_by:
+            creator = db.get(User, hw.created_by)
+            if creator:
+                creator_tg = creator.telegram_id
+        users = db.query(User).filter(
+            User.group_name == hw.group_name, User.telegram_id.isnot(None)
+        ).all()
+        if not users:
+            return
+        dl_str = hw.deadline.strftime("%d.%m.%Y %H:%M") if hw.deadline else "—"
+        subj = html_escape(hw.subject or "—")
+        desc = html_escape((hw.description or "—").strip() or "—")
+        text = (
+            f"📚 <b>Новое задание</b>\n"
+            f"{sep_line()}\n\n"
+            f"<b>{subj}</b>\n\n"
+            f"📝 {desc}\n\n"
+            f"⏰ <b>Дедлайн:</b> {html_escape(dl_str)}"
+        )
+        ptb = await get_ptb_application()
+        for user in users:
+            if creator_tg and user.telegram_id == creator_tg:
+                continue  # создатель уже получил подтверждение в самом боте
+            try:
+                await ptb.bot.send_message(chat_id=user.telegram_id, text=text, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                log.warning("Не удалось уведомить %s: %s", user.telegram_id, e)
+    finally:
+        db.close()
 
 
 async def notify_lesson_override(group_name: str, day_date: str, time: str, subject: str,
