@@ -16,8 +16,12 @@ async def save_homework_file(
     db: Session,
     hw_id: int,
     upload: UploadFile,
+    max_bytes: int | None = None,
 ) -> HomeworkFile:
     raw = await upload.read()
+    if max_bytes is not None and len(raw) > max_bytes:
+        from fastapi import HTTPException
+        raise HTTPException(413, f"Файл слишком большой (максимум {max_bytes // (1024*1024)} МБ)")
     if config.STORE_FILES_IN_DB:
         hf = HomeworkFile(
             hw_id=hw_id,
