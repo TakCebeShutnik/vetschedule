@@ -1249,6 +1249,17 @@ async def process_webhook_update(payload: dict) -> None:
     await ptb.process_update(update)
 
 
+async def run_reminders_once() -> None:
+    """Разовый прогон напоминаний о дедлайнах — вызывается из /api/cron/reminders.
+
+    В webhook-режиме (Vercel) нет постоянного процесса, поэтому job_queue не
+    работает: см. build_application(). Вместо этого внешний cron дёргает
+    HTTP-эндпоинт с нужным интервалом, а тот вызывает эту функцию.
+    """
+    ptb = await get_ptb_application()
+    await send_deadline_reminders(ptb)
+
+
 async def register_webhook() -> str:
     ptb = await get_ptb_application()
     base = config.SITE_URL.rstrip("/")
