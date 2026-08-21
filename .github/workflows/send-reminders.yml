@@ -1,0 +1,30 @@
+# Дёргает /api/cron/reminders раз в 30 минут.
+# Нужен, т.к. в webhook-режиме на Vercel (serverless) нет постоянного процесса
+# для job_queue бота — напоминания о дедлайнах иначе никогда не отправятся.
+#
+# Секреты репозитория (Settings → Secrets and variables → Actions):
+#   SITE_URL     — например https://vetschedule.vercel.app
+#   CRON_SECRET  — то же значение, что и переменная окружения CRON_SECRET на Vercel
+
+name: Send homework reminders
+
+concurrency:
+  group: send-reminders
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call reminders endpoint
+        run: |
+          if [ -z "${{ secrets.SITE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "SITE_URL / CRON_SECRET secrets не заданы — skip"
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.SITE_URL }}/api/cron/reminders?secret=${{ secrets.CRON_SECRET }}"
