@@ -7,15 +7,17 @@ FastAPI-бэкенд расписания ветеринарной академ�
 import os
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
+from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -122,6 +124,21 @@ def hw_to_dict(hw: Homework) -> dict:
 
 # ─── Schedule endpoints ──────────────────────────────────────────────────────
 
+@app.get("/api/health")
+def api_health(db: Session = Depends(get_db)):
+    """Для аптайм-мониторинга (UptimeRobot и т.п.): проверяет БД и наличие расписаний."""
+    checks = {}
+    try:
+        db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+    groups = list_groups()
+    checks["schedule_groups"] = len(groups)
+    healthy = checks["database"] == "ok" and checks["schedule_groups"] > 0
+    return {"status": "ok" if healthy else "degraded", **checks}
+
+
 @app.get("/api/groups")
 def api_groups():
     """Список всех доступных групп."""
@@ -178,12 +195,16 @@ def api_tomorrow(group: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/lesson-overrides/toggle")
-def api_lesson_override_toggle(body: LessonOverrideToggle, db: Session = Depends(get_db)):
+def api_lesson_override_toggle(
+    body: LessonOverrideToggle,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Отметить пару отменённой или вернуть (нужен код редактора)."""
     require_editor_code(body.editor_code)
     if not load_group(body.group_name):
         raise HTTPException(404, "Группа не найдена")
-    return toggle_override(
+    result = toggle_override(
         db,
         body.group_name,
         body.day_date,
@@ -191,6 +212,16 @@ def api_lesson_override_toggle(body: LessonOverrideToggle, db: Session = Depends
         body.subject,
         body.note,
     )
+    try:
+        from bot import notify_lesson_override
+        background_tasks.add_task(
+            notify_lesson_override,
+            body.group_name, body.day_date, body.time, body.subject,
+            result["cancelled"], body.note,
+        )
+    except Exception:
+        pass  # бот не настроен (нет TELEGRAM_TOKEN) — не блокируем ответ API
+    return result
 
 
 # ─── Homework endpoints ──────────────────────────────────────────────────────
@@ -381,6 +412,28 @@ async def api_telegram_webhook(request: Request):
 
     await process_webhook_update(await request.json())
     return {"ok": True}
+
+
+@app.post("/api/cron/cleanup")
+@app.get("/api/cron/cleanup")
+def api_cron_cleanup(secret: str = Query(...), days: int = Query(180), db: Session = Depends(get_db)):
+    """Удаляет вложения (не сами задания) у ДЗ с дедлайном старше N дней —
+    файлы хранятся как BYTEA в Postgres, на бесплатном Neon это не бесконечно.
+    Вызывается внешним планировщиком (см. .github/workflows/send-reminders.yml)."""
+    _check_cron_secret(secret)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    old_hw_ids = [
+        hw.id for hw in
+        db.query(Homework).filter(Homework.deadline.isnot(None), Homework.deadline < cutoff).all()
+    ]
+    if not old_hw_ids:
+        return {"ok": True, "deleted_files": 0}
+    files = db.query(HomeworkFile).filter(HomeworkFile.hw_id.in_(old_hw_ids)).all()
+    deleted = len(files)
+    for f in files:
+        db.delete(f)
+    db.commit()
+    return {"ok": True, "deleted_files": deleted, "checked_homework": len(old_hw_ids)}
 
 
 @app.post("/api/cron/reminders")
