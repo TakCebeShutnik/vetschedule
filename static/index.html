@@ -420,7 +420,6 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
         </div>
         <button class="add-hw-btn" onclick="HWModal.open()">+ Добавить</button>
       </div>
-      <!-- Фильтр по статусу: раскомментируй блок и выстави HW_STATUS_ENABLED=true в script
       <div class="hw-filter-section">
         <div class="hw-filter-label">Статус</div>
         <div class="hw-filters" id="hw-status-filters">
@@ -430,7 +429,6 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
           <button class="filter-btn"        data-filter="done"        onclick="HW.setStatusFilter('done')">Сдано</button>
         </div>
       </div>
-      -->
       <div class="hw-filter-section" id="hw-subj-section" style="display:none">
         <div class="hw-filter-label">Предмет</div>
         <div class="hw-filters" id="hw-subj-filters"></div>
@@ -467,7 +465,6 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
       <input class="form-input" id="hw-deadline" type="datetime-local"/>
       <div class="date-suggestions" id="date-suggestions"></div>
     </div>
-    <!-- Поле «Статус»: верни вместе с HW_STATUS_ENABLED в script
     <div class="form-group">
       <label class="form-label">Статус</label>
       <select class="form-select" id="hw-status">
@@ -476,7 +473,6 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
         <option value="done">✅ Сдано</option>
       </select>
     </div>
-    -->
     <div class="form-group">
       <label class="form-label">Файлы</label>
       <div class="file-drop" id="file-drop" onclick="document.getElementById('hw-files').click()">
@@ -537,7 +533,7 @@ const API=(()=>{
 })();
 
 /** Статусы ДЗ: поставь true и раскомментируй блоки «Статус» в HTML выше */
-const HW_STATUS_ENABLED=false;
+const HW_STATUS_ENABLED=true;
 /** Код для добавления / правки / удаления заданий и вложений */
 const HW_EDITOR_CODE='0801';
 function getEditorCode(){try{return sessionStorage.getItem('vs_hw_code')||''}catch(_){return ''}}
