@@ -49,12 +49,14 @@ class HWCreate(BaseModel):
     description: Optional[str] = None
     deadline: Optional[str] = None     # ISO datetime string or "YYYY-MM-DD"
     created_by_tg: Optional[int] = None
+    editor_code: Optional[str] = None
 
 class HWUpdate(BaseModel):
     subject: Optional[str] = None
     description: Optional[str] = None
     deadline: Optional[str] = None
     status: Optional[str] = None       # pending | in_progress | done
+    editor_code: Optional[str] = None
 
 class UserCreate(BaseModel):
     telegram_id: Optional[int] = None
@@ -228,6 +230,7 @@ def api_hw_get(hw_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/homework", status_code=201)
 def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
+    require_editor_code(body.editor_code)
     user_id = None
     if body.created_by_tg:
         user = db.query(User).filter(User.telegram_id == body.created_by_tg).first()
@@ -253,6 +256,10 @@ def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
+    # Менять статус (pending/in_progress/done) может любой студент без кода.
+    # Редактирование содержимого задания (тема/описание/срок) требует кода редактора.
+    if body.subject is not None or body.description is not None or body.deadline is not None:
+        require_editor_code(body.editor_code)
     if body.subject is not None:
         hw.subject = body.subject
     if body.description is not None:
@@ -269,7 +276,8 @@ def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/homework/{hw_id}", status_code=204)
-def api_hw_delete(hw_id: int, db: Session = Depends(get_db)):
+def api_hw_delete(hw_id: int, editor_code: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    require_editor_code(editor_code)
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
@@ -277,12 +285,29 @@ def api_hw_delete(hw_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 МБ
+ALLOWED_UPLOAD_EXT = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".txt", ".rtf", ".odt", ".ods", ".odp",
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".zip", ".rar",
+}
+
+
 @app.post("/api/homework/{hw_id}/files")
-async def api_hw_upload(hw_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def api_hw_upload(
+    hw_id: int,
+    file: UploadFile = File(...),
+    editor_code: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    require_editor_code(editor_code)
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
-    hf = await save_homework_file(db, hw_id, file)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXT:
+        raise HTTPException(415, f"Тип файла не поддерживается ({ext or 'без расширения'})")
+    hf = await save_homework_file(db, hw_id, file, max_bytes=MAX_UPLOAD_BYTES)
     return {"id": hf.id, "filename": hf.filename, "url": f"/api/files/{hf.id}"}
 
 
@@ -298,7 +323,13 @@ def api_file_download(file_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/homework/{hw_id}/files/{file_id}", status_code=204)
-def api_hw_file_delete(hw_id: int, file_id: int, db: Session = Depends(get_db)):
+def api_hw_file_delete(
+    hw_id: int,
+    file_id: int,
+    editor_code: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    require_editor_code(editor_code)
     hf = db.get(HomeworkFile, file_id)
     if not hf or hf.hw_id != hw_id:
         raise HTTPException(404, "Файл не найден")
@@ -349,6 +380,21 @@ async def api_telegram_webhook(request: Request):
     from bot import process_webhook_update
 
     await process_webhook_update(await request.json())
+    return {"ok": True}
+
+
+@app.post("/api/cron/reminders")
+@app.get("/api/cron/reminders")
+async def api_cron_reminders(secret: str = Query(...)):
+    """Дёргается внешним планировщиком (GitHub Actions/cron-job.org) раз в N минут,
+    т.к. на serverless (Vercel, webhook-режим) job_queue бота не запускается —
+    см. bot.build_application(). Требует CRON_SECRET."""
+    _check_cron_secret(secret)
+    if not config.TELEGRAM_TOKEN:
+        raise HTTPException(503, "TELEGRAM_TOKEN не задан")
+    from bot import run_reminders_once
+
+    await run_reminders_once()
     return {"ok": True}
 
 
