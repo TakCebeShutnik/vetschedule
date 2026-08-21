@@ -1110,9 +1110,14 @@ async def send_deadline_reminders(app):
     if not HW_STATUS_ENABLED:
         return
     from database import SessionLocal, Homework, User
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
     db = SessionLocal()
     try:
-        now       = datetime.utcnow()
+        # Дедлайны в БД хранятся как введённые студентом — по местному времени
+        # колледжа (Asia/Novosibirsk), не в UTC. Поэтому и "сейчас" берём в той
+        # же таймзоне, а не utcnow() — иначе сравнение сдвинуто на несколько часов.
+        now       = _dt.now(ZoneInfo(config.APP_TIMEZONE)).replace(tzinfo=None)
         threshold = now + timedelta(hours=config.NOTIFY_BEFORE_HOURS)
         items = (
             db.query(Homework)
@@ -1247,6 +1252,36 @@ async def process_webhook_update(payload: dict) -> None:
     ptb = await get_ptb_application()
     update = Update.de_json(payload, ptb.bot)
     await ptb.process_update(update)
+
+
+async def notify_lesson_override(group_name: str, day_date: str, time: str, subject: str,
+                                   cancelled: bool, note: Optional[str] = None) -> None:
+    """Уведомляет в Telegram всех студентов группы об отмене/восстановлении пары.
+    Вызывается фоново из /api/lesson-overrides/toggle — не блокирует ответ API."""
+    if not config.TELEGRAM_TOKEN:
+        return
+    from database import SessionLocal, User
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(
+            User.group_name == group_name, User.telegram_id.isnot(None)
+        ).all()
+        if not users:
+            return
+        ptb = await get_ptb_application()
+        if cancelled:
+            text = f"🚫 <b>Пара отменена</b>\n{day_date}, {time} — {subject}"
+            if note:
+                text += f"\n<i>{note}</i>"
+        else:
+            text = f"✅ <b>Отмена снята</b>\n{day_date}, {time} — {subject}"
+        for user in users:
+            try:
+                await ptb.bot.send_message(chat_id=user.telegram_id, text=text, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                log.warning("Не удалось уведомить %s: %s", user.telegram_id, e)
+    finally:
+        db.close()
 
 
 async def run_reminders_once() -> None:
