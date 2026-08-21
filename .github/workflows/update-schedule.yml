@@ -1,5 +1,11 @@
 # Парсер расписания: скачать PDF → JSON в schedule_json/ → коммит в репозиторий.
 # На PythonAnywhere настройте Scheduled task: git pull (см. .env.example).
+#
+# Доп. секреты для алерта при подозрительном падении числа пар (не обязательны,
+# но без них при поломке парсера просто ничего не закоммитится и придётся
+# заметить это самому по логам Actions):
+#   TELEGRAM_TOKEN     — токен бота
+#   ADMIN_TELEGRAM_ID  — твой telegram_id, куда слать алерт
 
 name: Update schedule JSON
 
@@ -27,6 +33,9 @@ jobs:
       - name: Install parser dependencies
         run: pip install -r requirements-parser.txt
 
+      - name: Count lessons before parsing (baseline)
+        run: echo "BEFORE=$(python scripts/schedule_lesson_count.py schedule_json)" >> "$GITHUB_ENV"
+
       - name: Run schedule parser
         env:
           SCHEDULE_PDF_URL: ${{ secrets.SCHEDULE_PDF_URL }}
@@ -36,6 +45,33 @@ jobs:
             exit 0
           fi
           python schedule_parser.py --url "$SCHEDULE_PDF_URL" -o schedule_json
+
+      - name: Sanity-check parser output
+        run: |
+          AFTER=$(python scripts/schedule_lesson_count.py schedule_json)
+          echo "Пар до парсинга: $BEFORE, после: $AFTER"
+          echo "AFTER=$AFTER" >> "$GITHUB_ENV"
+          # Если раньше пары были, а теперь пусто/резко меньше половины —
+          # вёрстка PDF колледжа могла измениться и парсер сломался молча.
+          if [ "$BEFORE" -gt "0" ]; then
+            THRESHOLD=$((BEFORE / 2))
+            if [ "$AFTER" -lt "$THRESHOLD" ]; then
+              echo "::error::Подозрительное падение числа пар ($BEFORE → $AFTER). Коммит отменён."
+              echo "SANITY_FAILED=1" >> "$GITHUB_ENV"
+            fi
+          fi
+
+      - name: Alert on Telegram if sanity-check failed
+        if: env.SANITY_FAILED == '1'
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_TOKEN }}" ] || [ -z "${{ secrets.ADMIN_TELEGRAM_ID }}" ]; then
+            echo "TELEGRAM_TOKEN / ADMIN_TELEGRAM_ID не заданы — алерт пропущен"
+            exit 1
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.ADMIN_TELEGRAM_ID }}" \
+            -d text="⚠️ Парсер расписания: подозрительное падение числа пар ($BEFORE → $AFTER). Проверь вёрстку PDF колледжа. Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          exit 1
 
       - name: Commit JSON if changed
         run: |
