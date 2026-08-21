@@ -14,7 +14,8 @@ concurrency:
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *"   # напоминания — каждые 30 минут
+    - cron: "0 3 * * 0"      # очистка старых файлов ДЗ — раз в неделю, вс 03:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -28,3 +29,11 @@ jobs:
             exit 0
           fi
           curl -fsS -X POST "${{ secrets.SITE_URL }}/api/cron/reminders?secret=${{ secrets.CRON_SECRET }}"
+
+      - name: Call cleanup endpoint (only on Sunday schedule)
+        if: github.event.schedule == '0 3 * * 0'
+        run: |
+          if [ -z "${{ secrets.SITE_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.SITE_URL }}/api/cron/cleanup?secret=${{ secrets.CRON_SECRET }}&days=180"
