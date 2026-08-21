@@ -128,6 +128,8 @@ class Config:
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*").strip()
     NOTIFY_BEFORE_HOURS: int = int(os.getenv("NOTIFY_BEFORE_HOURS", 24))
     EDITOR_CODE: str = os.getenv("EDITOR_CODE", os.getenv("HW_EDITOR_CODE", "0801"))
+    # Дедлайны ДЗ вводятся студентами в местном времени колледжа, а не в UTC.
+    APP_TIMEZONE: str = os.getenv("APP_TIMEZONE", "Asia/Novosibirsk")
 
     _db_url: str | None = None
 
