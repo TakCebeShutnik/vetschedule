@@ -9,7 +9,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: "0 5 * * 1"
+    - cron: "0 2 * * *"   # каждый день в 02:00 UTC (пары могут отменить/перенести среди недели)
   workflow_dispatch:
 
 jobs:
