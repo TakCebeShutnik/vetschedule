@@ -260,7 +260,7 @@ def api_hw_get(hw_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/homework", status_code=201)
-def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
+def api_hw_create(body: HWCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     require_editor_code(body.editor_code)
     user_id = None
     if body.created_by_tg:
@@ -279,6 +279,11 @@ def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
     db.add(hw)
     db.commit()
     db.refresh(hw)
+    try:
+        from bot import notify_new_homework
+        background_tasks.add_task(notify_new_homework, hw.id)
+    except Exception:
+        pass  # бот не настроен (нет TELEGRAM_TOKEN) — не блокируем ответ API
     return hw_to_dict(hw)
 
 
