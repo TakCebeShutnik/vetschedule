@@ -1,0 +1,28 @@
+# Регрессионные тесты парсера расписания (tests/test_schedule_parser_*.py).
+# Ловят поломки в логике перехода дней/недель, а также в обработке
+# мёрженых ячеек и вложенных таблиц — оба уже один раз ломались на реальном
+# PDF колледжа. Не требуют самого PDF: тесты строят синтетические .docx.
+name: Tests
+
+on:
+  push:
+    paths:
+      - "schedule_parser.py"
+      - "tests/**"
+      - "requirements*.txt"
+      - ".github/workflows/tests.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest tests/ -v
