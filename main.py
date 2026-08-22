@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, List
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -195,9 +195,8 @@ def api_tomorrow(group: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/lesson-overrides/toggle")
-def api_lesson_override_toggle(
+async def api_lesson_override_toggle(
     body: LessonOverrideToggle,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Отметить пару отменённой или вернуть (нужен код редактора)."""
@@ -212,15 +211,17 @@ def api_lesson_override_toggle(
         body.subject,
         body.note,
     )
+    # Ждём отправку синхронно (не через BackgroundTasks) — см. пояснение
+    # в api_hw_create: на Vercel фоновая задача может не успеть выполниться.
     try:
         from bot import notify_lesson_override
-        background_tasks.add_task(
-            notify_lesson_override,
+        await notify_lesson_override(
             body.group_name, body.day_date, body.time, body.subject,
             result["cancelled"], body.note,
         )
-    except Exception:
-        pass  # бот не настроен (нет TELEGRAM_TOKEN) — не блокируем ответ API
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("notify_lesson_override failed: %s", e)
     return result
 
 
@@ -260,7 +261,7 @@ def api_hw_get(hw_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/homework", status_code=201)
-def api_hw_create(body: HWCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
     require_editor_code(body.editor_code)
     user_id = None
     if body.created_by_tg:
@@ -279,11 +280,15 @@ def api_hw_create(body: HWCreate, background_tasks: BackgroundTasks, db: Session
     db.add(hw)
     db.commit()
     db.refresh(hw)
+    # Ждём отправку синхронно (не через BackgroundTasks): на serverless
+    # (Vercel) функция может "заморозиться" сразу после ответа, и фоновая
+    # задача не успевает доработать — сообщение в Telegram просто не уйдёт.
     try:
         from bot import notify_new_homework
-        background_tasks.add_task(notify_new_homework, hw.id)
-    except Exception:
-        pass  # бот не настроен (нет TELEGRAM_TOKEN) — не блокируем ответ API
+        await notify_new_homework(hw.id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("notify_new_homework failed: %s", e)
     return hw_to_dict(hw)
 
 
