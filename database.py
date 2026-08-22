@@ -115,6 +115,17 @@ class HomeworkMessage(Base):
     homework   = relationship("Homework", back_populates="messages")
 
 
+class RateLimitHit(Base):
+    """Для rate-limiting публичных эндпоинтов. Через БД, а не in-memory —
+    на serverless (Vercel) каждый вызов функции может попасть в новый
+    контейнер, и обычный счётчик в памяти процесса просто не сохранится
+    между запросами."""
+    __tablename__ = "rate_limit_hits"
+    id  = Column(Integer, primary_key=True, index=True)
+    key = Column(String(160), nullable=False, index=True)  # 'bucket:ip'
+    ts  = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class LessonOverride(Base):
     """Отмена пары (PDF не обновили — правка вручную с кодом)."""
     __tablename__ = "lesson_overrides"
