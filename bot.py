@@ -117,7 +117,7 @@ def trunc_btn(s: str, max_len: int = 42) -> str:
 
 def format_hw_line(hw: dict, idx: Optional[int], compact: bool = True) -> str:
     """Строка в общем списке (без полного текста — открывай карточку)."""
-    em = hw_emoji(hw["status"]) if HW_STATUS_ENABLED else ""
+    em = hw_emoji(hw["my_status"]) if HW_STATUS_ENABLED else ""
     subj = html_escape(hw.get("subject") or "—")
     dl = ""
     if hw.get("deadline"):
@@ -142,8 +142,8 @@ def format_hw_card(hw: dict) -> str:
     """Полная карточка для просмотра: описание, файлы (+ статус, если HW_STATUS_ENABLED)."""
     subj = html_escape(hw.get("subject") or "—")
     if HW_STATUS_ENABLED:
-        em = hw_emoji(hw["status"])
-        st = hw_status_label(hw["status"])
+        em = hw_emoji(hw["my_status"])
+        st = hw_status_label(hw["my_status"])
         lines = [
             f"{em} <b>{subj}</b>",
             sep_line(),
@@ -424,10 +424,13 @@ async def cb_week_nav(update: Update, ctx):
 
 # ─── /hw — список ДЗ ──────────────────────────────────────────────────────────
 
-async def _build_hw_list_message(ctx) -> tuple[str, InlineKeyboardMarkup]:
+async def _build_hw_list_message(ctx, tg_id: Optional[int] = None) -> tuple[str, InlineKeyboardMarkup]:
     """Текст и клавиатура списка ДЗ (group уже проверен)."""
     group = get_group(ctx)
-    data = await api_get("/homework", group=group)
+    params = {"group": group}
+    if tg_id:
+        params["owner_key"] = f"tg:{tg_id}"
+    data = await api_get("/homework", **params)
     items = data.get("homework", [])
 
     header = (
@@ -436,8 +439,8 @@ async def _build_hw_list_message(ctx) -> tuple[str, InlineKeyboardMarkup]:
     )
     header += f"\n{sep_line()}"
 
-    pending = [h for h in items if h["status"] != "done"]
-    done = [h for h in items if h["status"] == "done"]
+    pending = [h for h in items if h["my_status"] != "done"]
+    done = [h for h in items if h["my_status"] == "done"]
 
     if not items:
         kb = InlineKeyboardMarkup([
@@ -515,7 +518,7 @@ async def _show_hw(update: Update, ctx):
         )
         return
     try:
-        text, kb = await _build_hw_list_message(ctx)
+        text, kb = await _build_hw_list_message(ctx, update.effective_user.id)
     except Exception as e:
         await update.effective_message.reply_text(
             f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>",
@@ -537,7 +540,7 @@ async def cb_hw_view(update: Update, ctx):
     await query.answer()
     hw_id = int(query.data.split(":")[1])
     try:
-        hw = await api_get(f"/homework/{hw_id}")
+        hw = await api_get(f"/homework/{hw_id}", owner_key=f"tg:{update.effective_user.id}")
     except Exception:
         await query.answer("Не удалось загрузить задание", show_alert=True)
         return
@@ -563,8 +566,10 @@ async def cb_hw_status(update: Update, ctx):
     if status not in ("pending", "in_progress", "done"):
         await query.answer()
         return
+    owner_key = f"tg:{update.effective_user.id}"
     try:
-        hw = await api_put(f"/homework/{hw_id}", {"status": status})
+        await api_put(f"/homework/{hw_id}/status", {"owner_key": owner_key, "status": status})
+        hw = await api_get(f"/homework/{hw_id}", owner_key=owner_key)
     except Exception:
         await query.answer("Не удалось сохранить статус", show_alert=True)
         return
@@ -597,7 +602,7 @@ async def cb_hw_back(update: Update, ctx):
     except Exception:
         pass
     try:
-        text, kb = await _build_hw_list_message(ctx)
+        text, kb = await _build_hw_list_message(ctx, update.effective_user.id)
     except Exception as e:
         await ctx.bot.send_message(
             chat_id,
@@ -1106,10 +1111,62 @@ async def cb_router(update: Update, ctx):
 
 # ─── Напоминания о дедлайнах ──────────────────────────────────────────────────
 
+async def cmd_remindme(update: Update, ctx):
+    """Личная настройка времени напоминания: /remindme 6 — за 6 часов до дедлайна.
+    Без аргумента — показывает текущее значение и подсказку."""
+    from database import SessionLocal, User
+    tg_id = update.effective_user.id
+    args = ctx.args or []
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_id == tg_id).first()
+        if not user:
+            await update.effective_message.reply_text(
+                "⚠️ Сначала открой /start и выбери группу.", parse_mode=ParseMode.HTML
+            )
+            return
+        if not args:
+            current = user.notify_hours or config.NOTIFY_BEFORE_HOURS
+            await update.effective_message.reply_text(
+                f"⏰ <b>Напоминание о дедлайнах</b>\n{sep_line()}\n\n"
+                f"Сейчас: за <b>{current}</b> ч. до срока"
+                f"{' (значение по умолчанию)' if not user.notify_hours else ''}.\n\n"
+                f"Изменить: <code>/remindme 6</code> — например, за 6 часов.\n"
+                f"Сбросить на дефолт: <code>/remindme off</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        if args[0].lower() in ("off", "0", "сброс"):
+            user.notify_hours = None
+            db.commit()
+            await update.effective_message.reply_text(
+                f"✅ Сброшено на значение по умолчанию ({config.NOTIFY_BEFORE_HOURS} ч.)."
+            )
+            return
+        try:
+            hours = int(args[0])
+        except ValueError:
+            await update.effective_message.reply_text("⚠️ Укажи число часов, например: /remindme 6")
+            return
+        if not (0 < hours <= 24 * 14):
+            await update.effective_message.reply_text("⚠️ Часы должны быть от 1 до 336 (14 дней).")
+            return
+        user.notify_hours = hours
+        db.commit()
+        await update.effective_message.reply_text(f"✅ Буду напоминать за {hours} ч. до дедлайна.")
+    finally:
+        db.close()
+
+
 async def send_deadline_reminders(app):
+    """Личные напоминания: у каждого студента своё время до дедлайна
+    (User.notify_hours, дефолт NOTIFY_BEFORE_HOURS) и своя отметка о
+    выполнении (HomeworkStatus) — кто уже отметил "сделано", тому не шлём.
+    HomeworkReminderLog не даёт напомнить дважды одному человеку об одном ДЗ
+    (cron дёргает этот код каждые 30 минут)."""
     if not HW_STATUS_ENABLED:
         return
-    from database import SessionLocal, Homework, User
+    from database import SessionLocal, Homework, User, HomeworkStatus, HomeworkReminderLog
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
     db = SessionLocal()
@@ -1117,21 +1174,30 @@ async def send_deadline_reminders(app):
         # Дедлайны в БД хранятся как введённые студентом — по местному времени
         # колледжа (Asia/Novosibirsk), не в UTC. Поэтому и "сейчас" берём в той
         # же таймзоне, а не utcnow() — иначе сравнение сдвинуто на несколько часов.
-        now       = _dt.now(ZoneInfo(config.APP_TIMEZONE)).replace(tzinfo=None)
-        threshold = now + timedelta(hours=config.NOTIFY_BEFORE_HOURS)
-        items = (
-            db.query(Homework)
-            .filter(
-                Homework.deadline >= now,
-                Homework.deadline <= threshold,
-                Homework.status   != "done",
-                Homework.notified == False,
+        now = _dt.now(ZoneInfo(config.APP_TIMEZONE)).replace(tzinfo=None)
+        # Берём с запасом на самое большое возможное личное окно (14 дней),
+        # дальше для каждого пользователя фильтруем уже его собственным порогом.
+        candidates = db.query(Homework).filter(
+            Homework.deadline >= now,
+            Homework.deadline <= now + timedelta(days=14),
+        ).all()
+        if not candidates:
+            return
+        for hw in candidates:
+            users = db.query(User).filter(
+                User.group_name == hw.group_name, User.telegram_id.isnot(None)
             ).all()
-        )
-        for hw in items:
-            for user in db.query(User).filter(User.group_name == hw.group_name).all():
-                if not user.telegram_id:
-                    continue
+            for user in users:
+                hours = user.notify_hours or config.NOTIFY_BEFORE_HOURS
+                if hw.deadline > now + timedelta(hours=hours):
+                    continue  # для этого пользователя ещё рано
+                owner_key = f"tg:{user.telegram_id}"
+                st = db.query(HomeworkStatus).filter_by(hw_id=hw.id, owner_key=owner_key).first()
+                if st and st.status == "done":
+                    continue  # уже отметил выполненным — не напоминаем
+                already = db.query(HomeworkReminderLog).filter_by(hw_id=hw.id, owner_key=owner_key).first()
+                if already:
+                    continue  # уже напоминали
                 try:
                     dl = hw.deadline.strftime("%d.%m.%Y %H:%M")
                     await app.bot.send_message(
@@ -1146,9 +1212,9 @@ async def send_deadline_reminders(app):
                         ),
                         parse_mode=ParseMode.HTML,
                     )
+                    db.add(HomeworkReminderLog(hw_id=hw.id, owner_key=owner_key))
                 except Exception as e:
                     log.warning(f"Не удалось уведомить {user.telegram_id}: {e}")
-            hw.notified = True
         db.commit()
     finally:
         db.close()
@@ -1219,6 +1285,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("tomorrow", cmd_tomorrow))
     app.add_handler(CommandHandler("week",     cmd_week))
     app.add_handler(CommandHandler("hw",       cmd_hw))
+    app.add_handler(CommandHandler("remindme", cmd_remindme))
     app.add_handler(addhw_conv)
     app.add_handler(cancellesson_conv)
     app.add_handler(CallbackQueryHandler(cb_group_select, pattern=r"^grp:"))
