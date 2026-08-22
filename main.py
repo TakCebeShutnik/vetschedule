@@ -265,6 +265,23 @@ def api_hw_list(
     return {"homework": [hw_to_dict(h, statuses.get(h.id)) for h in items]}
 
 
+@app.get("/api/homework/stats")
+def api_hw_stats(group: str = Query(...), owner_key: str = Query(...), db: Session = Depends(get_db)):
+    """Личная статистика выполнения по группе: сколько всего / сдано / просрочено.
+    ВАЖНО: должен быть объявлен ДО /api/homework/{hw_id} — иначе роутер FastAPI
+    матчит /stats как hw_id и отдаёт 422 (порядок регистрации маршрутов важен)."""
+    now = datetime.utcnow()
+    items = db.query(Homework).filter(Homework.group_name == group).all()
+    statuses = _personal_statuses(db, [h.id for h in items], owner_key)
+    total = len(items)
+    done = sum(1 for h in items if statuses.get(h.id) == "done")
+    overdue = sum(
+        1 for h in items
+        if statuses.get(h.id) != "done" and h.deadline and h.deadline < now
+    )
+    return {"total": total, "done": done, "overdue": overdue}
+
+
 @app.get("/api/homework/{hw_id}")
 def api_hw_get(hw_id: int, owner_key: Optional[str] = Query(None), db: Session = Depends(get_db)):
     hw = db.get(Homework, hw_id)
@@ -459,21 +476,6 @@ def api_user_set_notify_hours(telegram_id: int, hours: Optional[int] = Query(Non
     user.notify_hours = hours
     db.commit()
     return {"telegram_id": telegram_id, "notify_hours": user.notify_hours}
-
-
-@app.get("/api/homework/stats")
-def api_hw_stats(group: str = Query(...), owner_key: str = Query(...), db: Session = Depends(get_db)):
-    """Личная статистика выполнения по группе: сколько всего / сдано / просрочено."""
-    now = datetime.utcnow()
-    items = db.query(Homework).filter(Homework.group_name == group).all()
-    statuses = _personal_statuses(db, [h.id for h in items], owner_key)
-    total = len(items)
-    done = sum(1 for h in items if statuses.get(h.id) == "done")
-    overdue = sum(
-        1 for h in items
-        if statuses.get(h.id) != "done" and h.deadline and h.deadline < now
-    )
-    return {"total": total, "done": done, "overdue": overdue}
 
 
 @app.get("/api/users/{telegram_id}")
