@@ -210,6 +210,14 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
 .hw-item:hover{box-shadow:var(--shadow)}
 .hw-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:6px}
 .hw-status-dot.pending{background:#ef4444}.hw-status-dot.in_progress{background:#f59e0b}.hw-status-dot.done{background:#10b981}
+.hw-stats-bar{position:relative;height:34px;border-radius:10px;background:var(--surface2);overflow:hidden;margin:0 0 12px;display:flex;align-items:center}
+.hw-stats-bar-fill{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent),#10b981);opacity:.35;transition:width .4s ease}
+.hw-stats-text{position:relative;padding:0 12px;font-size:13px;font-weight:600;color:var(--text)}
+.hw-stats-overdue{color:#ef4444;font-weight:600}
+.hw-offline-banner{padding:10px 14px;margin-bottom:10px;border-radius:10px;background:rgba(245,158,11,.12);color:#b45309;font-size:13px;font-weight:600}
+[data-theme="dark"] .hw-offline-banner{color:#fbbf24}
+@keyframes hwSharedPulse{0%,100%{box-shadow:0 0 0 0 rgba(58,111,255,0)}30%{box-shadow:0 0 0 4px var(--accent-glow)}}
+.hw-item--shared{animation:hwSharedPulse 1.3s ease}
 .hw-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
 .hw-subject{font-weight:700;font-size:15px;margin-bottom:4px}
 .hw-desc{font-size:14px;color:var(--text2);margin-bottom:8px;line-height:1.5}
@@ -433,6 +441,7 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
         <div class="hw-filter-label">Предмет</div>
         <div class="hw-filters" id="hw-subj-filters"></div>
       </div>
+      <div id="hw-stats-bar" class="hw-stats-bar" style="display:none"></div>
       <div id="hw-list" class="hw-list"></div>
     </div>
   </section>
@@ -464,14 +473,6 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
       <label class="form-label">Дедлайн</label>
       <input class="form-input" id="hw-deadline" type="datetime-local"/>
       <div class="date-suggestions" id="date-suggestions"></div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Статус</label>
-      <select class="form-select" id="hw-status">
-        <option value="pending">🔴 Не сделано</option>
-        <option value="in_progress">🟡 В процессе</option>
-        <option value="done">✅ Сдано</option>
-      </select>
     </div>
     <div class="form-group">
       <label class="form-label">Файлы</label>
@@ -536,6 +537,16 @@ const API=(()=>{
 const HW_STATUS_ENABLED=true;
 /** Код для добавления / правки / удаления заданий и вложений */
 const HW_EDITOR_CODE='0801';
+/** Анонимный id браузера — используется как owner_key ('web:<id>') для личных
+    отметок о выполнении ДЗ и статистики (аккаунтов на сайте нет). */
+function getClientId(){
+  try{
+    let id=localStorage.getItem('vs_client_id');
+    if(!id){id=(crypto.randomUUID?crypto.randomUUID():'web-'+Date.now()+'-'+Math.random().toString(36).slice(2));localStorage.setItem('vs_client_id',id)}
+    return id;
+  }catch(_){return 'web-fallback'}
+}
+const OWNER_KEY='web:'+getClientId();
 function getEditorCode(){try{return sessionStorage.getItem('vs_hw_code')||''}catch(_){return ''}}
 function ensureEditorCode(){
   try{if(sessionStorage.getItem('vs_hw_code')===HW_EDITOR_CODE)return true}catch(_){}
@@ -698,10 +709,10 @@ const LessonHW=(()=>{
   async function loadCounts(){
     const group=App.group;if(!group)return;
     try{
-      const data=await API.get('/api/homework',{group});
+      const data=await API.get('/api/homework',{group,owner_key:OWNER_KEY});
       const counts={};
       (data.homework||[]).forEach(hw=>{
-        if(HW_STATUS_ENABLED&&hw.status==='done')return;
+        if(HW_STATUS_ENABLED&&hw.my_status==='done')return;
         const k=cleanSubject(hw.subject);counts[k]=(counts[k]||0)+1;
       });
       document.querySelectorAll('[id^="hwc-"]').forEach(badge=>{
@@ -725,7 +736,7 @@ const LessonHW=(()=>{
     const mini=document.getElementById(`hwm-${uid}`);if(!mini)return;
     mini.innerHTML=skLessonHwMiniHtml();
     try{
-      const data=await API.get('/api/homework',{group:App.group});
+      const data=await API.get('/api/homework',{group:App.group,owner_key:OWNER_KEY});
       const subNorm=cleanSubject(subject);
       const items=(data.homework||[]).filter(hw=>cleanSubject(hw.subject)===subNorm);
       if(!items.length){mini.innerHTML='<div class="lesson-hw-panel-empty">Домашних заданий нет. Добавьте кнопкой ниже.</div>';return}
@@ -736,10 +747,10 @@ const LessonHW=(()=>{
         const fl=(hw.files||[]).length?(hw.files||[]).map(f=>`<a href="${API.fileUrl(f.id)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📎 ${esc(f.filename)}</a>`).join(''):'<span class="lesson-hw-mini-files-empty">Нет вложений</span>';
         return `<div class="lesson-hw-mini-item" id="lhwi-${hw.id}">
           <div class="lesson-hw-mini-top" onclick="LessonHW.toggleMini(event,this)">
-            <div class="lesson-hw-mini-dot ${HW_STATUS_ENABLED?hw.status:'neutral'}"></div>
+            <div class="lesson-hw-mini-dot ${HW_STATUS_ENABLED?hw.my_status:'neutral'}"></div>
             <span class="lesson-hw-mini-subject">${esc(hw.subject)}</span>
             ${dl?`<span class="lesson-hw-mini-dl ${dl.cls}">${dl.label}</span>`:''}
-            ${HW_STATUS_ENABLED&&hw.status!=='done'?`<button type="button" class="lesson-hw-mini-done" onclick="event.stopPropagation();LessonHW.markDone(${hw.id},'${uid}','${subjE}')">✅</button>`:''}
+            ${HW_STATUS_ENABLED&&hw.my_status!=='done'?`<button type="button" class="lesson-hw-mini-done" onclick="event.stopPropagation();LessonHW.markDone(${hw.id},'${uid}','${subjE}')">✅</button>`:''}
             <span class="lesson-hw-mini-chev">▾</span>
           </div>
           <div class="lesson-hw-mini-detail" onclick="event.stopPropagation()">
@@ -787,14 +798,14 @@ const HW=(()=>{
     const dl=hw.deadline?fmtDeadline(hw.deadline):null;
     const files=(hw.files||[]).map(f=>`<a class="hw-file-badge" href="${API.fileUrl(f.id)}" target="_blank" rel="noopener noreferrer">📎 ${esc(f.filename)}</a>`).join('');
     const fileBlock=files?`<div class="hw-detail-files">${files}</div>`:'<div class="hw-detail-files"><span class="hw-detail-empty">Нет прикреплённых файлов</span></div>';
-    const stLabel=statusLabel(hw.status);
+    const stLabel=statusLabel(hw.my_status);
     const metaExtra=stLabel?`<span>${stLabel}</span>`:'';
     const statusBtns=HW_STATUS_ENABLED
-      ?(`${hw.status!=='done'?`<button class="hw-act-btn primary" onclick="HW.markDone(${hw.id})">✅ Выполнено</button>`:''}
-          ${hw.status==='pending'?`<button class="hw-act-btn" onclick="HW.markProgress(${hw.id})">🟡 В процессе</button>`:''}`)
+      ?(`${hw.my_status!=='done'?`<button class="hw-act-btn primary" onclick="HW.markDone(${hw.id})">✅ Выполнено</button>`:''}
+          ${hw.my_status==='pending'?`<button class="hw-act-btn" onclick="HW.markProgress(${hw.id})">🟡 В процессе</button>`:''}`)
       :'';
     return `<div class="hw-item animate-in${pastCls}" id="hw-${hw.id}">
-      <div class="hw-status-dot ${HW_STATUS_ENABLED?hw.status:'neutral'}"></div>
+      <div class="hw-status-dot ${HW_STATUS_ENABLED?hw.my_status:'neutral'}"></div>
       <div class="hw-body">
         <div class="hw-summary" onclick="HW.toggleExpand(${hw.id},event)">
           <div class="hw-summary-inner">
@@ -808,6 +819,7 @@ const HW=(()=>{
         <div class="hw-actions" onclick="event.stopPropagation()">
           ${statusBtns}
           <button class="hw-act-btn" onclick="HWModal.openEdit(${hw.id})">✏️</button>
+          <button type="button" class="hw-act-btn hw-act-btn--icon" title="Скопировать ссылку" onclick="HW.shareLink(${hw.id})">🔗</button>
           <button type="button" class="hw-act-btn hw-act-btn--icon danger" title="Удалить задание" onclick="HW.del(${hw.id})">${iconTrash()}</button>
         </div>
       </div>
@@ -817,17 +829,63 @@ const HW=(()=>{
     try{sessionStorage.removeItem('vs_hw_code')}catch(_){}
     toast('Код сброшен. При следующем действии с заданием он запросится снова.','info',4000);
   }
+  function hwCacheKey(group){return 'vs_hw_cache_'+group}
   async function load(){
     const group=App.group;if(!group)return;
     const list=document.getElementById('hw-list');list.innerHTML=skHwListHtml();
     try{
-      const params={group};
-      if(HW_STATUS_ENABLED&&statusFilter!=='all')params.status=statusFilter;
+      const params={group,owner_key:OWNER_KEY};
       const data=await API.get('/api/homework',params);
-      let items=data.homework||[];buildSubjectFilters(items);
+      let items=data.homework||[];
+      try{localStorage.setItem(hwCacheKey(group),JSON.stringify(items))}catch(_){}
+      buildSubjectFilters(items);
       if(subjectFilter)items=items.filter(h=>h.subject===subjectFilter);
+      if(HW_STATUS_ENABLED&&statusFilter!=='all')items=items.filter(h=>h.my_status===statusFilter);
       render(items);
-    }catch(e){list.innerHTML=`<div style="color:var(--text2);padding:20px">Ошибка: ${e.message}</div>`}
+      renderStats(group);
+      maybeOpenSharedHw(items);
+    }catch(e){
+      let cached=null;
+      try{cached=JSON.parse(localStorage.getItem(hwCacheKey(group))||'null')}catch(_){}
+      if(cached&&cached.length){
+        buildSubjectFilters(cached);
+        let items=subjectFilter?cached.filter(h=>h.subject===subjectFilter):cached;
+        if(HW_STATUS_ENABLED&&statusFilter!=='all')items=items.filter(h=>h.my_status===statusFilter);
+        render(items);
+        list.insertAdjacentHTML('afterbegin','<div class="hw-offline-banner">📡 Нет соединения — показаны сохранённые ранее задания, могут быть неактуальны.</div>');
+      }else{
+        list.innerHTML=`<div style="color:var(--text2);padding:20px">Ошибка: ${e.message}</div>`;
+      }
+    }
+  }
+  async function renderStats(group){
+    const el=document.getElementById('hw-stats-bar');if(!el)return;
+    try{
+      const s=await API.get('/api/homework/stats',{group,owner_key:OWNER_KEY});
+      if(!s.total){el.style.display='none';return}
+      el.style.display='';
+      const pct=Math.round(100*s.done/s.total);
+      let extra=s.overdue?` · <span class="hw-stats-overdue">⚠️ ${s.overdue} просрочено</span>`:'';
+      el.innerHTML=`<div class="hw-stats-bar-fill" style="width:${pct}%"></div><span class="hw-stats-text">${s.done} из ${s.total} выполнено (${pct}%)${extra}</span>`;
+    }catch(_){el.style.display='none'}
+  }
+  function maybeOpenSharedHw(items){
+    const params=new URLSearchParams(location.search);
+    const hwId=params.get('hw');
+    if(!hwId)return;
+    history.replaceState(null,'',location.pathname);
+    const el=document.getElementById('hw-'+hwId);
+    if(el){
+      el.scrollIntoView({behavior:'smooth',block:'center'});
+      el.classList.add('expanded','hw-item--shared');
+      setTimeout(()=>el.classList.remove('hw-item--shared'),2600);
+    }
+  }
+  function shareLink(id){
+    const url=`${location.origin}${location.pathname}?hw=${id}`;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(()=>toast('🔗 Ссылка скопирована','success',2200)).catch(()=>prompt('Скопируйте ссылку:',url));
+    }else{prompt('Скопируйте ссылку:',url)}
   }
   function render(items){
     const list=document.getElementById('hw-list');
@@ -858,10 +916,10 @@ const HW=(()=>{
     list.innerHTML=html;
   }
   function toggleExpand(id,ev){if(ev&&ev.target.closest('.hw-act-btn'))return;document.getElementById('hw-'+id)?.classList.toggle('expanded')}
-  async function markDone(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}`,{status:'done'});toast('✅ Выполнено!','success');load();LessonHW.loadCounts()}catch(e){toast('Ошибка: '+e.message,'error')}}
-  async function markProgress(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}`,{status:'in_progress'});load()}catch(e){toast('Ошибка: '+e.message,'error')}}
+  async function markDone(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}/status`,{owner_key:OWNER_KEY,status:'done'});toast('✅ Выполнено!','success');load();LessonHW.loadCounts()}catch(e){toast('Ошибка: '+e.message,'error')}}
+  async function markProgress(id){if(!HW_STATUS_ENABLED)return;try{await API.put(`/api/homework/${id}/status`,{owner_key:OWNER_KEY,status:'in_progress'});load()}catch(e){toast('Ошибка: '+e.message,'error')}}
   async function del(id){if(!ensureEditorCode())return;if(!confirm('Удалить это задание?'))return;try{await API.del(`/api/homework/${id}`,{editor_code:getEditorCode()});toast('Задание удалено','info');load();LessonHW.loadCounts()}catch(e){toast('Ошибка: '+e.message,'error')}}
-  return{load,setStatusFilter,setSubjectFilter,markDone,markProgress,del,toggleExpand,forgetCode}
+  return{load,setStatusFilter,setSubjectFilter,markDone,markProgress,del,toggleExpand,forgetCode,shareLink}
 })();
 
 const HWModal=(()=>{
@@ -893,10 +951,10 @@ const HWModal=(()=>{
     pendingFiles.splice(idx,1);
     renderFileList();
   }
-  function resetForm(){$id('hw-subject').value='';$id('hw-desc').value='';$id('hw-deadline').value='';const st=$id('hw-status');if(st)st.value='pending';$id('date-suggestions').innerHTML='';closeDropdown();pendingFiles=[];attachedFiles=[];acFocusIdx=-1;renderFileList()}
+  function resetForm(){$id('hw-subject').value='';$id('hw-desc').value='';$id('hw-deadline').value='';$id('date-suggestions').innerHTML='';closeDropdown();pendingFiles=[];attachedFiles=[];acFocusIdx=-1;renderFileList()}
   function open(){if(!ensureEditorCode())return;editId=null;resetForm();$id('hw-modal-title').textContent='Добавить задание';show()}
   function openFromLesson(subject,deadline){if(!ensureEditorCode())return;editId=null;resetForm();$id('hw-modal-title').textContent='Добавить задание';$id('hw-subject').value=subject;$id('hw-deadline').value=deadline;updateDateSuggestions(subject);show()}
-  async function openEdit(id){if(!ensureEditorCode())return;editId=id;pendingFiles=[];attachedFiles=[];try{const hw=await API.get(`/api/homework/${id}`);$id('hw-modal-title').textContent='Редактировать задание';$id('hw-subject').value=hw.subject||'';$id('hw-desc').value=hw.description||'';$id('hw-deadline').value=hw.deadline?hw.deadline.slice(0,16):'';const st=$id('hw-status');if(st)st.value=hw.status||'pending';attachedFiles=[...(hw.files||[])];renderFileList();updateDateSuggestions(hw.subject||'');show()}catch(e){editId=null;toast('Ошибка загрузки','error')}}
+  async function openEdit(id){if(!ensureEditorCode())return;editId=id;pendingFiles=[];attachedFiles=[];try{const hw=await API.get(`/api/homework/${id}`,{owner_key:OWNER_KEY});$id('hw-modal-title').textContent='Редактировать задание';$id('hw-subject').value=hw.subject||'';$id('hw-desc').value=hw.description||'';$id('hw-deadline').value=hw.deadline?hw.deadline.slice(0,16):'';attachedFiles=[...(hw.files||[])];renderFileList();updateDateSuggestions(hw.subject||'');show()}catch(e){editId=null;toast('Ошибка загрузки','error')}}
   function show(){$id('hw-modal-overlay').classList.add('open');setTimeout(()=>$id('hw-subject').focus(),80)}
   function close(){$id('hw-modal-overlay').classList.remove('open');closeDropdown()}
   function bgClose(e){if(e.target.id==='hw-modal-overlay')close()}
@@ -951,8 +1009,6 @@ const HWModal=(()=>{
     if(!ensureEditorCode())return;
     const subject=$id('hw-subject').value.trim();if(!subject){toast('Введите предмет','error');return}
     const body={group_name:App.group,subject,description:$id('hw-desc').value.trim()||null,deadline:$id('hw-deadline').value||null,editor_code:getEditorCode()};
-    const stEl=$id('hw-status');
-    if(HW_STATUS_ENABLED&&stEl)body.status=stEl.value;
     try{
       let hw;
       if(editId){hw=await API.put(`/api/homework/${editId}`,body);toast('✅ Задание обновлено!','success')}
