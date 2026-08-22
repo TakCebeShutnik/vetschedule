@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
-from database import init_db, get_db, Homework, HomeworkFile, User
+from database import init_db, get_db, Homework, HomeworkFile, HomeworkStatus, User
 from lesson_overrides import apply_to_weeks, apply_to_day, toggle_override
 from schedule_utils import load_group, list_groups, get_week, classify_lesson
 from file_storage import save_homework_file, file_download_response, delete_homework_file
@@ -57,8 +57,12 @@ class HWUpdate(BaseModel):
     subject: Optional[str] = None
     description: Optional[str] = None
     deadline: Optional[str] = None
-    status: Optional[str] = None       # pending | in_progress | done
     editor_code: Optional[str] = None
+
+class HWStatusSet(BaseModel):
+    """Личная отметка о выполнении — без кода редактора, доступно всем."""
+    owner_key: str    # 'tg:<telegram_id>' из бота или 'web:<client_id>' с сайта
+    status: str        # pending | in_progress | done
 
 class UserCreate(BaseModel):
     telegram_id: Optional[int] = None
@@ -106,20 +110,30 @@ def _enrich_day(group: str, day: dict, db: Session) -> None:
     apply_to_day(group, day, db)
 
 
-def hw_to_dict(hw: Homework) -> dict:
+def hw_to_dict(hw: Homework, my_status: Optional[str] = None) -> dict:
     return {
         "id":          hw.id,
         "group_name":  hw.group_name,
         "subject":     hw.subject,
         "description": hw.description,
         "deadline":    hw.deadline.isoformat() if hw.deadline else None,
-        "status":      hw.status,
+        "my_status":   my_status or "pending",  # личная отметка (см. HomeworkStatus)
         "created_at":  hw.created_at.isoformat(),
         "files": [
             {"id": f.id, "filename": f.filename, "url": f"/api/files/{f.id}"}
             for f in hw.files
         ],
     }
+
+
+def _personal_statuses(db: Session, hw_ids: list, owner_key: Optional[str]) -> dict:
+    """Возвращает {hw_id: status} для конкретного owner_key одним запросом."""
+    if not owner_key or not hw_ids:
+        return {}
+    rows = db.query(HomeworkStatus).filter(
+        HomeworkStatus.hw_id.in_(hw_ids), HomeworkStatus.owner_key == owner_key
+    ).all()
+    return {r.hw_id: r.status for r in rows}
 
 
 # ─── Schedule endpoints ──────────────────────────────────────────────────────
@@ -230,16 +244,14 @@ async def api_lesson_override_toggle(
 @app.get("/api/homework")
 def api_hw_list(
     group: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
+    owner_key: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     q = db.query(Homework)
     if group:
         q = q.filter(Homework.group_name == group)
-    if status:
-        q = q.filter(Homework.status == status)
     if from_date:
         dt = parse_deadline(from_date)
         if dt:
@@ -249,15 +261,20 @@ def api_hw_list(
         if dt:
             q = q.filter(Homework.deadline <= dt)
     items = q.order_by(Homework.deadline.asc().nullslast()).all()
-    return {"homework": [hw_to_dict(h) for h in items]}
+    statuses = _personal_statuses(db, [h.id for h in items], owner_key)
+    return {"homework": [hw_to_dict(h, statuses.get(h.id)) for h in items]}
 
 
 @app.get("/api/homework/{hw_id}")
-def api_hw_get(hw_id: int, db: Session = Depends(get_db)):
+def api_hw_get(hw_id: int, owner_key: Optional[str] = Query(None), db: Session = Depends(get_db)):
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
-    return hw_to_dict(hw)
+    my_status = None
+    if owner_key:
+        row = db.query(HomeworkStatus).filter_by(hw_id=hw_id, owner_key=owner_key).first()
+        my_status = row.status if row else None
+    return hw_to_dict(hw, my_status)
 
 
 @app.post("/api/homework", status_code=201)
@@ -274,7 +291,6 @@ async def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
         subject     = body.subject,
         description = body.description,
         deadline    = parse_deadline(body.deadline),
-        status      = "pending",
         created_by  = user_id,
     )
     db.add(hw)
@@ -297,7 +313,6 @@ async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
-    # Менять статус (pending/in_progress/done) может любой студент без кода.
     # Редактирование содержимого задания (тема/описание/срок) требует кода редактора.
     content_changed = body.subject is not None or body.description is not None or body.deadline is not None
     if content_changed:
@@ -308,10 +323,6 @@ async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db
         hw.description = body.description
     if body.deadline is not None:
         hw.deadline = parse_deadline(body.deadline)
-    if body.status is not None:
-        if body.status not in ("pending", "in_progress", "done"):
-            raise HTTPException(400, "Неверный статус")
-        hw.status = body.status
     db.commit()
     db.refresh(hw)
     if content_changed:
@@ -323,6 +334,26 @@ async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db
             import logging
             logging.getLogger(__name__).exception("notify_homework_updated failed: %s", e)
     return hw_to_dict(hw)
+
+
+@app.put("/api/homework/{hw_id}/status")
+def api_hw_set_status(hw_id: int, body: HWStatusSet, db: Session = Depends(get_db)):
+    """Личная отметка о выполнении — своя для каждого owner_key, код редактора не нужен."""
+    if body.status not in ("pending", "in_progress", "done"):
+        raise HTTPException(400, "Неверный статус")
+    if not body.owner_key:
+        raise HTTPException(400, "owner_key обязателен")
+    hw = db.get(Homework, hw_id)
+    if not hw:
+        raise HTTPException(404, "ДЗ не найдено")
+    row = db.query(HomeworkStatus).filter_by(hw_id=hw_id, owner_key=body.owner_key).first()
+    if row:
+        row.status = body.status
+    else:
+        row = HomeworkStatus(hw_id=hw_id, owner_key=body.owner_key, status=body.status)
+        db.add(row)
+    db.commit()
+    return {"hw_id": hw_id, "my_status": body.status}
 
 
 @app.delete("/api/homework/{hw_id}", status_code=204)
@@ -415,6 +446,34 @@ def api_user_create(body: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return {"id": user.id, "created": True}
+
+
+@app.put("/api/users/{telegram_id}/notify-hours")
+def api_user_set_notify_hours(telegram_id: int, hours: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    """Личная настройка «за сколько часов напомнить о дедлайне». hours=None — сброс на дефолт."""
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    if hours is not None and not (0 < hours <= 24 * 14):
+        raise HTTPException(400, "Часы должны быть от 1 до 336 (14 дней)")
+    user.notify_hours = hours
+    db.commit()
+    return {"telegram_id": telegram_id, "notify_hours": user.notify_hours}
+
+
+@app.get("/api/homework/stats")
+def api_hw_stats(group: str = Query(...), owner_key: str = Query(...), db: Session = Depends(get_db)):
+    """Личная статистика выполнения по группе: сколько всего / сдано / просрочено."""
+    now = datetime.utcnow()
+    items = db.query(Homework).filter(Homework.group_name == group).all()
+    statuses = _personal_statuses(db, [h.id for h in items], owner_key)
+    total = len(items)
+    done = sum(1 for h in items if statuses.get(h.id) == "done")
+    overdue = sum(
+        1 for h in items
+        if statuses.get(h.id) != "done" and h.deadline and h.deadline < now
+    )
+    return {"total": total, "done": done, "overdue": overdue}
 
 
 @app.get("/api/users/{telegram_id}")
