@@ -61,6 +61,7 @@ class Homework(Base):
     notified    = Column(Boolean, default=False)   # флаг: уведомление отправлено
     creator     = relationship("User", back_populates="homework", foreign_keys=[created_by])
     files       = relationship("HomeworkFile", back_populates="homework", cascade="all, delete-orphan")
+    messages    = relationship("HomeworkMessage", back_populates="homework", cascade="all, delete-orphan")
 
 
 class HomeworkFile(Base):
@@ -72,6 +73,19 @@ class HomeworkFile(Base):
     file_data    = Column(LargeBinary, nullable=True)
     content_type = Column(String(120), nullable=True, default="application/octet-stream")
     homework     = relationship("Homework", back_populates="files")
+
+
+class HomeworkMessage(Base):
+    """Telegram-сообщение, отправленное конкретному чату при создании ДЗ.
+    Хранится, чтобы при редактировании/удалении ДЗ обновить/удалить именно
+    это сообщение, а не слать дубликат."""
+    __tablename__ = "homework_messages"
+    id         = Column(Integer, primary_key=True, index=True)
+    hw_id      = Column(Integer, ForeignKey("homework.id"), nullable=False, index=True)
+    chat_id    = Column(Integer, nullable=False)
+    message_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    homework   = relationship("Homework", back_populates="messages")
 
 
 class LessonOverride(Base):
