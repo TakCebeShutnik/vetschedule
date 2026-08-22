@@ -669,7 +669,22 @@ const App=(()=>{
       renderWeek();
     }catch(e){toast('Ошибка: '+e.message,'error')}
   }
-  async function init(){loadState();setTheme(state.theme);if(state.group)await selectGroup(state.group);else showPicker()}
+  async function init(){
+    loadState();
+    setTheme(state.theme);
+    const sharedHwId=new URLSearchParams(location.search).get('hw');
+    if(sharedHwId){
+      state.tab='hw';
+      if(!state.group){
+        // Группа неизвестна (первый визит) — узнаём её из самого задания.
+        try{
+          const hw=await API.get(`/api/homework/${sharedHwId}`);
+          if(hw&&hw.group_name){await selectGroup(hw.group_name);return}
+        }catch(_){}
+      }
+    }
+    if(state.group)await selectGroup(state.group);else showPicker();
+  }
   return{init,showPicker,toggleTheme,setTab,toggleDay,prevWeek,nextWeek,goToday,reloadSchedule,get group(){return state.group},get allWeeks(){return state.allWeeks}}
 })();
 
@@ -876,6 +891,8 @@ const HW=(()=>{
     history.replaceState(null,'',location.pathname);
     const el=document.getElementById('hw-'+hwId);
     if(el){
+      const details=el.closest('details');
+      if(details&&!details.open)details.open=true;
       el.scrollIntoView({behavior:'smooth',block:'center'});
       el.classList.add('expanded','hw-item--shared');
       setTimeout(()=>el.classList.remove('hw-item--shared'),2600);
