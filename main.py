@@ -14,17 +14,18 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
-from database import init_db, get_db, Homework, HomeworkFile, HomeworkStatus, User
+from database import init_db, get_db, Homework, HomeworkFile, HomeworkStatus, RateLimitHit, User
 from lesson_overrides import apply_to_weeks, apply_to_day, toggle_override
 from schedule_utils import load_group, list_groups, get_week, classify_lesson
 from file_storage import save_homework_file, file_download_response, delete_homework_file
+
 
 # ─── Инициализация ───────────────────────────────────────────────────────────
 
@@ -94,6 +95,46 @@ def parse_deadline(s: Optional[str]) -> Optional[datetime]:
 def require_editor_code(code: Optional[str]) -> None:
     if not code or code.strip() != config.EDITOR_CODE:
         raise HTTPException(403, "Неверный код доступа")
+
+
+def _client_ip(request: Request) -> str:
+    """На Vercel запрос идёт через прокси — реальный IP в X-Forwarded-For."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limiter(bucket: str, limit: int, window_seconds: int):
+    """Фабрика FastAPI-зависимости: не больше `limit` запросов за `window_seconds`
+    секунд с одного IP в рамках `bucket`. Хранит счётчик в БД (не в памяти —
+    см. RateLimitHit). Один общий bucket на все эндпоинты с кодом редактора
+    заодно ограничивает перебор самого кода (4 цифры — иначе перебирается
+    за минуты)."""
+    def _dep(request: Request, db: Session = Depends(get_db)):
+        ip = _client_ip(request)
+        key = f"{bucket}:{ip}"
+        now = datetime.utcnow()
+        window_start = now - timedelta(seconds=window_seconds)
+        db.query(RateLimitHit).filter(
+            RateLimitHit.key == key, RateLimitHit.ts < window_start
+        ).delete()
+        count = db.query(RateLimitHit).filter(
+            RateLimitHit.key == key, RateLimitHit.ts >= window_start
+        ).count()
+        if count >= limit:
+            raise HTTPException(429, "Слишком много запросов. Попробуйте позже.")
+        db.add(RateLimitHit(key=key, ts=now))
+        db.commit()
+    return _dep
+
+
+# Общий лимит на все действия с кодом редактора (создание/правка/удаление ДЗ,
+# файлы, отмена пар) — сдерживает перебор 4-значного кода с одного IP.
+_editor_rl  = rate_limiter("editor_auth", limit=8,  window_seconds=300)
+_hw_write_rl = rate_limiter("hw_write",   limit=20, window_seconds=60)
+_hw_status_rl = rate_limiter("hw_status", limit=40, window_seconds=60)
+_user_reg_rl = rate_limiter("user_reg",   limit=10, window_seconds=60)
 
 
 def _enrich_weeks(group: str, weeks: list, db: Session) -> None:
@@ -212,6 +253,7 @@ def api_tomorrow(group: str, db: Session = Depends(get_db)):
 async def api_lesson_override_toggle(
     body: LessonOverrideToggle,
     db: Session = Depends(get_db),
+    _rl=Depends(_editor_rl),
 ):
     """Отметить пару отменённой или вернуть (нужен код редактора)."""
     require_editor_code(body.editor_code)
@@ -295,7 +337,7 @@ def api_hw_get(hw_id: int, owner_key: Optional[str] = Query(None), db: Session =
 
 
 @app.post("/api/homework", status_code=201)
-async def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
+async def api_hw_create(body: HWCreate, db: Session = Depends(get_db), _rl=Depends(_hw_write_rl)):
     require_editor_code(body.editor_code)
     user_id = None
     if body.created_by_tg:
@@ -326,7 +368,7 @@ async def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
 
 
 @app.put("/api/homework/{hw_id}")
-async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
+async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db), _rl=Depends(_hw_write_rl)):
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
@@ -354,7 +396,7 @@ async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db
 
 
 @app.put("/api/homework/{hw_id}/status")
-def api_hw_set_status(hw_id: int, body: HWStatusSet, db: Session = Depends(get_db)):
+def api_hw_set_status(hw_id: int, body: HWStatusSet, db: Session = Depends(get_db), _rl=Depends(_hw_status_rl)):
     """Личная отметка о выполнении — своя для каждого owner_key, код редактора не нужен."""
     if body.status not in ("pending", "in_progress", "done"):
         raise HTTPException(400, "Неверный статус")
@@ -374,7 +416,7 @@ def api_hw_set_status(hw_id: int, body: HWStatusSet, db: Session = Depends(get_d
 
 
 @app.delete("/api/homework/{hw_id}", status_code=204)
-async def api_hw_delete(hw_id: int, editor_code: Optional[str] = Query(None), db: Session = Depends(get_db)):
+async def api_hw_delete(hw_id: int, editor_code: Optional[str] = Query(None), db: Session = Depends(get_db), _rl=Depends(_editor_rl)):
     require_editor_code(editor_code)
     hw = db.get(Homework, hw_id)
     if not hw:
@@ -407,6 +449,7 @@ async def api_hw_upload(
     file: UploadFile = File(...),
     editor_code: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    _rl=Depends(_editor_rl),
 ):
     require_editor_code(editor_code)
     hw = db.get(Homework, hw_id)
@@ -436,6 +479,7 @@ def api_hw_file_delete(
     file_id: int,
     editor_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    _rl=Depends(_editor_rl),
 ):
     require_editor_code(editor_code)
     hf = db.get(HomeworkFile, file_id)
@@ -449,7 +493,7 @@ def api_hw_file_delete(
 # ─── User endpoints ──────────────────────────────────────────────────────────
 
 @app.post("/api/users", status_code=201)
-def api_user_create(body: UserCreate, db: Session = Depends(get_db)):
+def api_user_create(body: UserCreate, db: Session = Depends(get_db), _rl=Depends(_user_reg_rl)):
     if body.telegram_id:
         existing = db.query(User).filter(User.telegram_id == body.telegram_id).first()
         if existing:
@@ -522,8 +566,14 @@ def api_cron_cleanup(secret: str = Query(...), days: int = Query(180), db: Sessi
     deleted = len(files)
     for f in files:
         db.delete(f)
+    # Заодно чистим старые записи rate-limit — за окном (5 мин / 60 сек) они
+    # уже никак не влияют на лимиты, но без этого таблица растёт бесконечно
+    # для IP, которые просто перестали заходить.
+    rl_deleted = db.query(RateLimitHit).filter(
+        RateLimitHit.ts < datetime.utcnow() - timedelta(hours=1)
+    ).delete()
     db.commit()
-    return {"ok": True, "deleted_files": deleted, "checked_homework": len(old_hw_ids)}
+    return {"ok": True, "deleted_files": deleted, "checked_homework": len(old_hw_ids), "rate_limit_rows_deleted": rl_deleted}
 
 
 @app.post("/api/cron/reminders")
