@@ -1,0 +1,4 @@
+# Тестовые зависимости (pytest tests/). Не нужны в проде — не включать
+# в requirements.txt / requirements-parser.txt, чтобы не раздувать деплой.
+-r requirements-parser.txt
+pytest
