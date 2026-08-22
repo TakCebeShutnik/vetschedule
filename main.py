@@ -293,13 +293,14 @@ async def api_hw_create(body: HWCreate, db: Session = Depends(get_db)):
 
 
 @app.put("/api/homework/{hw_id}")
-def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
+async def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
     # Менять статус (pending/in_progress/done) может любой студент без кода.
     # Редактирование содержимого задания (тема/описание/срок) требует кода редактора.
-    if body.subject is not None or body.description is not None or body.deadline is not None:
+    content_changed = body.subject is not None or body.description is not None or body.deadline is not None
+    if content_changed:
         require_editor_code(body.editor_code)
     if body.subject is not None:
         hw.subject = body.subject
@@ -313,17 +314,35 @@ def api_hw_update(hw_id: int, body: HWUpdate, db: Session = Depends(get_db)):
         hw.status = body.status
     db.commit()
     db.refresh(hw)
+    if content_changed:
+        # Правим уже отправленные в Telegram сообщения вместо дублирования.
+        try:
+            from bot import notify_homework_updated
+            await notify_homework_updated(hw.id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("notify_homework_updated failed: %s", e)
     return hw_to_dict(hw)
 
 
 @app.delete("/api/homework/{hw_id}", status_code=204)
-def api_hw_delete(hw_id: int, editor_code: Optional[str] = Query(None), db: Session = Depends(get_db)):
+async def api_hw_delete(hw_id: int, editor_code: Optional[str] = Query(None), db: Session = Depends(get_db)):
     require_editor_code(editor_code)
     hw = db.get(Homework, hw_id)
     if not hw:
         raise HTTPException(404, "ДЗ не найдено")
+    subject = hw.subject
+    # Список сообщений забираем ДО удаления — вместе с ДЗ каскадно удалятся
+    # и строки HomeworkMessage.
+    message_pairs = [(m.chat_id, m.message_id) for m in hw.messages]
     db.delete(hw)
     db.commit()
+    try:
+        from bot import notify_homework_deleted
+        await notify_homework_deleted(subject, message_pairs)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("notify_homework_deleted failed: %s", e)
 
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 МБ
