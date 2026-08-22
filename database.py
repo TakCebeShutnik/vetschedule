@@ -38,13 +38,14 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-    id          = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, nullable=True, index=True)
-    name        = Column(String(120), nullable=False)
-    group_name  = Column(String(60), nullable=True)
-    is_admin    = Column(Boolean, default=False)
-    created_at  = Column(DateTime, default=datetime.utcnow)
-    homework    = relationship("Homework", back_populates="creator", foreign_keys="Homework.created_by")
+    id           = Column(Integer, primary_key=True, index=True)
+    telegram_id  = Column(Integer, unique=True, nullable=True, index=True)
+    name         = Column(String(120), nullable=False)
+    group_name   = Column(String(60), nullable=True)
+    is_admin     = Column(Boolean, default=False)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    notify_hours = Column(Integer, nullable=True)  # личная настройка "за сколько часов напомнить"; NULL = дефолт
+    homework     = relationship("Homework", back_populates="creator", foreign_keys="Homework.created_by")
 
 
 class Homework(Base):
@@ -62,6 +63,8 @@ class Homework(Base):
     creator     = relationship("User", back_populates="homework", foreign_keys=[created_by])
     files       = relationship("HomeworkFile", back_populates="homework", cascade="all, delete-orphan")
     messages    = relationship("HomeworkMessage", back_populates="homework", cascade="all, delete-orphan")
+    personal_statuses = relationship("HomeworkStatus", back_populates="homework", cascade="all, delete-orphan")
+    reminder_log      = relationship("HomeworkReminderLog", back_populates="homework", cascade="all, delete-orphan")
 
 
 class HomeworkFile(Base):
@@ -73,6 +76,30 @@ class HomeworkFile(Base):
     file_data    = Column(LargeBinary, nullable=True)
     content_type = Column(String(120), nullable=True, default="application/octet-stream")
     homework     = relationship("Homework", back_populates="files")
+
+
+class HomeworkStatus(Base):
+    """Личная отметка о выполнении ДЗ. owner_key — 'tg:<telegram_id>' для бота
+    или 'web:<client_id>' для анонимного посетителя сайта (id из localStorage
+    браузера — аккаунтов на сайте нет). Одна запись = один человек = одно ДЗ."""
+    __tablename__ = "homework_status"
+    id         = Column(Integer, primary_key=True, index=True)
+    hw_id      = Column(Integer, ForeignKey("homework.id"), nullable=False, index=True)
+    owner_key  = Column(String(120), nullable=False, index=True)
+    status     = Column(String(20), nullable=False, default="pending")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    homework   = relationship("Homework", back_populates="personal_statuses")
+
+
+class HomeworkReminderLog(Base):
+    """Кому уже отправлено напоминание по конкретному ДЗ — чтобы не слать
+    повторно каждые 30 минут (cron дёргает /api/cron/reminders часто)."""
+    __tablename__ = "homework_reminder_log"
+    id        = Column(Integer, primary_key=True, index=True)
+    hw_id     = Column(Integer, ForeignKey("homework.id"), nullable=False, index=True)
+    owner_key = Column(String(120), nullable=False, index=True)
+    sent_at   = Column(DateTime, default=datetime.utcnow)
+    homework  = relationship("Homework", back_populates="reminder_log")
 
 
 class HomeworkMessage(Base):
@@ -122,10 +149,25 @@ def _ensure_hw_file_columns() -> None:
             ))
 
 
+def _ensure_user_columns() -> None:
+    """Добавляет notify_hours в существующую таблицу users (без потери данных)."""
+    from sqlalchemy import inspect, text
+
+    engine = _get_engine()
+    insp = inspect(engine)
+    if not insp.has_table("users"):
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    with engine.begin() as conn:
+        if "notify_hours" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN notify_hours INTEGER"))
+
+
 def init_db():
     engine = _get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_hw_file_columns()
+    _ensure_user_columns()
 
 
 def SessionLocal():
