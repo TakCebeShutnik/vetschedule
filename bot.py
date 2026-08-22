@@ -1254,13 +1254,25 @@ async def process_webhook_update(payload: dict) -> None:
     await ptb.process_update(update)
 
 
+def _hw_notify_text(subj: str, desc: str, dl_str: str, deleted: bool = False) -> str:
+    if deleted:
+        return f"🗑 <s>{subj}</s>\n<i>Задание удалено</i>"
+    return (
+        f"📚 <b>Новое задание</b>\n"
+        f"{sep_line()}\n\n"
+        f"<b>{subj}</b>\n\n"
+        f"📝 {desc}\n\n"
+        f"⏰ <b>Дедлайн:</b> {dl_str}"
+    )
+
+
 async def notify_new_homework(hw_id: int) -> None:
-    """Уведомляет в Telegram студентов группы о новом ДЗ. Вызывается фоново
-    из /api/homework (POST) — не блокирует ответ API. Создателю (если он
-    добавлял через бота) сообщение не дублируется — он уже видит подтверждение."""
+    """Уведомляет в Telegram студентов группы о новом ДЗ и запоминает id
+    отправленных сообщений (в HomeworkMessage) — чтобы позже отредактировать
+    их при изменении ДЗ или пометить удалёнными, вместо дублирования."""
     if not config.TELEGRAM_TOKEN:
         return
-    from database import SessionLocal, Homework, User
+    from database import SessionLocal, Homework, HomeworkMessage, User
     db = SessionLocal()
     try:
         hw = db.get(Homework, hw_id)
@@ -1276,26 +1288,79 @@ async def notify_new_homework(hw_id: int) -> None:
         ).all()
         if not users:
             return
-        dl_str = hw.deadline.strftime("%d.%m.%Y %H:%M") if hw.deadline else "—"
+        dl_str = html_escape(hw.deadline.strftime("%d.%m.%Y %H:%M") if hw.deadline else "—")
         subj = html_escape(hw.subject or "—")
         desc = html_escape((hw.description or "—").strip() or "—")
-        text = (
-            f"📚 <b>Новое задание</b>\n"
-            f"{sep_line()}\n\n"
-            f"<b>{subj}</b>\n\n"
-            f"📝 {desc}\n\n"
-            f"⏰ <b>Дедлайн:</b> {html_escape(dl_str)}"
-        )
+        text = _hw_notify_text(subj, desc, dl_str)
         ptb = await get_ptb_application()
         for user in users:
             if creator_tg and user.telegram_id == creator_tg:
                 continue  # создатель уже получил подтверждение в самом боте
             try:
-                await ptb.bot.send_message(chat_id=user.telegram_id, text=text, parse_mode=ParseMode.HTML)
+                sent = await ptb.bot.send_message(chat_id=user.telegram_id, text=text, parse_mode=ParseMode.HTML)
+                db.add(HomeworkMessage(hw_id=hw.id, chat_id=user.telegram_id, message_id=sent.message_id))
             except Exception as e:
                 log.warning("Не удалось уведомить %s: %s", user.telegram_id, e)
+        db.commit()
     finally:
         db.close()
+
+
+async def notify_homework_updated(hw_id: int) -> None:
+    """При изменении ДЗ пробует отредактировать уже отправленные сообщения.
+    Если сообщение больше нельзя редактировать (прошло >48ч — ограничение
+    Telegram, либо его удалили) — шлёт новое и заменяет сохранённый id."""
+    if not config.TELEGRAM_TOKEN:
+        return
+    from database import SessionLocal, Homework, HomeworkMessage
+    db = SessionLocal()
+    try:
+        hw = db.get(Homework, hw_id)
+        if not hw:
+            return
+        dl_str = html_escape(hw.deadline.strftime("%d.%m.%Y %H:%M") if hw.deadline else "—")
+        subj = html_escape(hw.subject or "—")
+        desc = html_escape((hw.description or "—").strip() or "—")
+        text = _hw_notify_text(subj, desc, dl_str)
+        ptb = await get_ptb_application()
+        rows = db.query(HomeworkMessage).filter(HomeworkMessage.hw_id == hw_id).all()
+        for row in rows:
+            try:
+                await ptb.bot.edit_message_text(
+                    chat_id=row.chat_id, message_id=row.message_id,
+                    text=text, parse_mode=ParseMode.HTML,
+                )
+            except Exception as e:
+                msg = str(e).lower()
+                if "message is not modified" in msg:
+                    continue  # текст не поменялся — ничего делать не нужно
+                # сообщение слишком старое (>48ч) или удалено пользователем —
+                # редактировать нельзя, шлём новое вместо него
+                try:
+                    sent = await ptb.bot.send_message(chat_id=row.chat_id, text=text, parse_mode=ParseMode.HTML)
+                    row.message_id = sent.message_id
+                except Exception as e2:
+                    log.warning("Не удалось обновить/переслать ДЗ %s чату %s: %s", hw_id, row.chat_id, e2)
+        db.commit()
+    finally:
+        db.close()
+
+
+async def notify_homework_deleted(subject: str, messages: list) -> None:
+    """Помечает удалёнными уже отправленные сообщения о ДЗ (subject уже
+    зачёркнут в тексте). messages — список (chat_id, message_id), берётся
+    ДО удаления ДЗ из базы, т.к. после удаления строки HomeworkMessage
+    каскадно исчезают вместе с ним."""
+    if not config.TELEGRAM_TOKEN or not messages:
+        return
+    subj = html_escape(subject or "—")
+    text = _hw_notify_text(subj, "", "", deleted=True)
+    ptb = await get_ptb_application()
+    for chat_id, message_id in messages:
+        try:
+            await ptb.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            log.warning("Не удалось пометить удалённым ДЗ (чат %s): %s", chat_id, e)
 
 
 async def notify_lesson_override(group_name: str, day_date: str, time: str, subject: str,
