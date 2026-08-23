@@ -19,8 +19,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
-:root{--bg:#0f1117;--surface:#181b24;--surface2:#1e2232;--border:rgba(255,255,255,.07);--text:#e8eaf2;--text2:#97a3b8;--accent:#4f7fff;--accent-glow:rgba(79,127,255,.25);--lecture:#4f7fff;--lecture-bg:rgba(79,127,255,.12);--lab:#f59e0b;--lab-bg:rgba(245,158,11,.12);--practical:#10b981;--practical-bg:rgba(16,185,129,.12);--other:#8b5cf6;--other-bg:rgba(139,92,246,.12);--radius:14px;--radius-sm:8px;--shadow:0 4px 32px rgba(0,0,0,.4);--font:'Onest',sans-serif;--mono:'JetBrains Mono',monospace;--trans:.2s cubic-bezier(.4,0,.2,1);--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--elev:0 1px 0 rgba(255,255,255,.055) inset,0 10px 42px rgba(0,0,0,.32);color-scheme:dark}
-[data-theme="light"]{--bg:#f0f2f8;--surface:#ffffff;--surface2:#eef0f8;--border:rgba(0,0,0,.08);--text:#1a1d2e;--text2:#5a6180;--accent:#3a6fff;--accent-glow:rgba(58,111,255,.18);--lecture-bg:rgba(79,127,255,.09);--lab-bg:rgba(245,158,11,.09);--practical-bg:rgba(16,185,129,.09);--other-bg:rgba(139,92,246,.09);--shadow:0 4px 24px rgba(0,0,0,.08);--elev:0 1px 0 rgba(255,255,255,.95) inset,0 4px 22px rgba(0,0,0,.07);color-scheme:light}
+:root{--bg:#0f1117;--surface:#181b24;--surface2:#1e2232;--border:rgba(255,255,255,.07);--text:#e8eaf2;--text2:#97a3b8;--accent:#4f7fff;--accent-glow:rgba(79,127,255,.25);--accent2:#22c3a6;--lecture:#4f7fff;--lecture-bg:rgba(79,127,255,.12);--lab:#f59e0b;--lab-bg:rgba(245,158,11,.12);--practical:#10b981;--practical-bg:rgba(16,185,129,.12);--other:#8b5cf6;--other-bg:rgba(139,92,246,.12);--radius:14px;--radius-sm:8px;--shadow:0 4px 32px rgba(0,0,0,.4);--font:'Onest',sans-serif;--mono:'JetBrains Mono',monospace;--trans:.2s cubic-bezier(.4,0,.2,1);--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--elev:0 1px 0 rgba(255,255,255,.055) inset,0 10px 42px rgba(0,0,0,.32);color-scheme:dark}
+[data-theme="light"]{--bg:#f0f2f8;--surface:#ffffff;--surface2:#eef0f8;--border:rgba(0,0,0,.08);--text:#1a1d2e;--text2:#5a6180;--accent:#3a6fff;--accent-glow:rgba(58,111,255,.18);--accent2:#159e86;--lecture-bg:rgba(79,127,255,.09);--lab-bg:rgba(245,158,11,.09);--practical-bg:rgba(16,185,129,.09);--other-bg:rgba(139,92,246,.09);--shadow:0 4px 24px rgba(0,0,0,.08);--elev:0 1px 0 rgba(255,255,255,.95) inset,0 4px 22px rgba(0,0,0,.07);color-scheme:light}
+/* Палитры — независимая ось от тёмной/светлой темы (data-palette на <html>).
+   Меняют только акцентные цвета (кнопки, активные вкладки, фокус, прогресс) —
+   семантические цвета статусов (готово/не готово/предупреждение) не трогают. */
+[data-palette="amber"]{--accent:#eab040;--accent-glow:rgba(234,176,64,.25);--accent2:#3f8f63}
+[data-theme="light"][data-palette="amber"]{--accent:#c17d1f;--accent-glow:rgba(193,125,31,.16);--accent2:#2f7a52}
+[data-palette="mint"]{--accent:#5eb896;--accent-glow:rgba(94,184,150,.25);--accent2:#e8735f}
+[data-theme="light"][data-palette="mint"]{--accent:#2f8f6b;--accent-glow:rgba(47,143,107,.16);--accent2:#d15f4c}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;min-height:100dvh;line-height:1.6;font-size:15px;transition:background var(--trans),color var(--trans);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);-webkit-tap-highlight-color:rgba(79,127,255,.15)}
@@ -211,7 +218,14 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
 .hw-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:6px}
 .hw-status-dot.pending{background:#ef4444}.hw-status-dot.in_progress{background:#f59e0b}.hw-status-dot.done{background:#10b981}
 .hw-stats-bar{position:relative;height:34px;border-radius:10px;background:var(--surface2);overflow:hidden;margin:0 0 12px;display:flex;align-items:center}
-.hw-stats-bar-fill{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent),#10b981);opacity:.35;transition:width .4s ease}
+.hw-stats-bar-fill{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent),var(--accent2));opacity:.35;transition:width .4s ease}
+.palette-picker{position:relative}
+.palette-popover{position:absolute;top:calc(100% + 8px);right:0;min-width:190px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column;gap:2px;opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity .16s ease,transform .16s ease,visibility .16s;z-index:60}
+.palette-picker.open .palette-popover{opacity:1;visibility:visible;transform:translateY(0)}
+.palette-swatch{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;border:none;background:transparent;color:var(--text);font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left;width:100%}
+.palette-swatch:hover{background:var(--surface2)}
+.palette-swatch.active{background:var(--surface2);box-shadow:inset 0 0 0 1px var(--accent)}
+.palette-dot{width:16px;height:16px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.12) inset}
 .hw-stats-text{position:relative;padding:0 12px;font-size:13px;font-weight:600;color:var(--text)}
 .hw-stats-overdue{color:#ef4444;font-weight:600}
 .hw-offline-banner{padding:10px 14px;margin-bottom:10px;border-radius:10px;background:rgba(245,158,11,.12);color:#b45309;font-size:13px;font-weight:600}
@@ -383,6 +397,20 @@ main{flex:1;padding:var(--s6);padding-bottom:calc(var(--s6) + env(safe-area-inse
   </button>
   <div class="spacer"></div>
   <a class="header-support" href="https://t.me/cc0untN0tAF0und" target="_blank" rel="noopener noreferrer" title="Техподдержка в Telegram" aria-label="Техподдержка в Telegram"><span aria-hidden="true">💬</span><span class="header-support-text">Поддержка</span></a>
+  <div class="palette-picker" id="palette-picker">
+    <button class="icon-btn" onclick="App.togglePalettePicker(event)" title="Цветовая палитра" id="palette-btn" aria-haspopup="true" aria-expanded="false">🎨</button>
+    <div class="palette-popover" id="palette-popover" role="menu">
+      <button class="palette-swatch" data-palette="blue" onclick="App.setPalette('blue')" role="menuitem" aria-label="Клинический синий">
+        <span class="palette-dot" style="background:#4f7fff"></span>Клинический синий
+      </button>
+      <button class="palette-swatch" data-palette="amber" onclick="App.setPalette('amber')" role="menuitem" aria-label="Тёплая шерсть">
+        <span class="palette-dot" style="background:#eab040"></span>Тёплая шерсть
+      </button>
+      <button class="palette-swatch" data-palette="mint" onclick="App.setPalette('mint')" role="menuitem" aria-label="Мятный графит">
+        <span class="palette-dot" style="background:#5eb896"></span>Мятный графит
+      </button>
+    </div>
+  </div>
   <button class="icon-btn" onclick="App.toggleTheme()" title="Сменить тему" id="theme-btn">🌙</button>
 </header>
 <main id="app-main">
@@ -587,11 +615,29 @@ function skLessonHwMiniHtml(){
 }
 
 const App=(()=>{
-  let state={group:null,weekNum:currentISOWeek(),tab:'schedule',theme:'dark',allWeeks:[]};
-  function saveState(){localStorage.setItem('vs_state',JSON.stringify({group:state.group,theme:state.theme}))}
+  let state={group:null,weekNum:currentISOWeek(),tab:'schedule',theme:'dark',palette:'blue',allWeeks:[]};
+  function saveState(){localStorage.setItem('vs_state',JSON.stringify({group:state.group,theme:state.theme,palette:state.palette}))}
   function loadState(){try{Object.assign(state,JSON.parse(localStorage.getItem('vs_state')||'{}'))}catch{}}
   function setTheme(t){state.theme=t;document.documentElement.setAttribute('data-theme',t);document.getElementById('theme-btn').textContent=t==='dark'?'☀️':'🌙';saveState()}
   function toggleTheme(){setTheme(state.theme==='dark'?'light':'dark')}
+  function setPalette(p){
+    state.palette=p;
+    document.documentElement.setAttribute('data-palette',p);
+    document.querySelectorAll('.palette-swatch').forEach(b=>b.classList.toggle('active',b.dataset.palette===p));
+    document.getElementById('palette-picker').classList.remove('open');
+    document.getElementById('palette-btn').setAttribute('aria-expanded','false');
+    saveState();
+  }
+  function togglePalettePicker(e){
+    e.stopPropagation();
+    const el=document.getElementById('palette-picker');
+    const open=el.classList.toggle('open');
+    document.getElementById('palette-btn').setAttribute('aria-expanded',String(open));
+  }
+  document.addEventListener('click',(e)=>{
+    const picker=document.getElementById('palette-picker');
+    if(picker&&!picker.contains(e.target))picker.classList.remove('open');
+  });
   function showPicker(){document.getElementById('page-picker').style.display='';document.getElementById('page-schedule').style.display='none';loadGroups()}
   function showSchedule(){document.getElementById('page-picker').style.display='none';document.getElementById('page-schedule').style.display='';document.getElementById('header-group-name').textContent=state.group}
   async function loadGroups(){const grid=document.getElementById('groups-grid');grid.innerHTML=skGroupsHtml();try{const data=await API.get('/api/groups');grid.innerHTML='';data.groups.forEach(g=>{const c=document.createElement('div');c.className='group-card animate-in';c.textContent=g;c.onclick=()=>selectGroup(g);grid.appendChild(c)})}catch(e){grid.innerHTML=`<div style="color:var(--text2)">Ошибка: ${e.message}</div>`}}
@@ -672,6 +718,8 @@ const App=(()=>{
   async function init(){
     loadState();
     setTheme(state.theme);
+    document.documentElement.setAttribute('data-palette',state.palette);
+    document.querySelectorAll('.palette-swatch').forEach(b=>b.classList.toggle('active',b.dataset.palette===state.palette));
     const sharedHwId=new URLSearchParams(location.search).get('hw');
     if(sharedHwId){
       state.tab='hw';
@@ -685,7 +733,7 @@ const App=(()=>{
     }
     if(state.group)await selectGroup(state.group);else showPicker();
   }
-  return{init,showPicker,toggleTheme,setTab,toggleDay,prevWeek,nextWeek,goToday,reloadSchedule,get group(){return state.group},get allWeeks(){return state.allWeeks}}
+  return{init,showPicker,toggleTheme,setPalette,togglePalettePicker,setTab,toggleDay,prevWeek,nextWeek,goToday,reloadSchedule,get group(){return state.group},get allWeeks(){return state.allWeeks}}
 })();
 
 const LessonCancel=(()=>{
