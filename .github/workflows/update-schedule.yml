@@ -6,6 +6,11 @@
 # заметить это самому по логам Actions):
 #   TELEGRAM_TOKEN     — токен бота
 #   ADMIN_TELEGRAM_ID  — твой telegram_id, куда слать алерт
+#
+# Секреты для уведомления студентов о реальных изменениях расписания
+# (те же, что уже настроены для send-reminders.yml — переиспользуются):
+#   SITE_URL     — например https://vetschedule.vercel.app
+#   CRON_SECRET  — то же значение, что и на Vercel
 
 name: Update schedule JSON
 
@@ -72,6 +77,12 @@ jobs:
             -d chat_id="${{ secrets.ADMIN_TELEGRAM_ID }}" \
             -d text="⚠️ Парсер расписания: подозрительное падение числа пар ($BEFORE → $AFTER). Проверь вёрстку PDF колледжа. Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           exit 1
+
+      - name: Notify students if schedule actually changed
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: python scripts/diff_and_notify_schedule.py
 
       - name: Commit JSON if changed
         run: |
