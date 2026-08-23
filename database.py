@@ -134,12 +134,17 @@ class BotUserData(Base):
 class BotConversationState(Base):
     """Активное состояние диалога (ConversationHandler) бота — та же причина,
     что и у BotUserData: без этого таблицы разговор "теряется" при холодном
-    старте, и следующее сообщение пользователя падает в пустоту без ответа."""
+    старте, и следующее сообщение пользователя падает в пустоту без ответа.
+    updated_at нужен для само-очистки: если диалог брошен на середине (не
+    дошли до /cancel) — раньше это "чинилось" само холодным стартом, теперь
+    состояние живёт вечно и будет перехватывать следующие сообщения, поэтому
+    старые (см. STALE_CONVERSATION_MINUTES в bot.py) записи игнорируются."""
     __tablename__ = "bot_conversation_state"
     id      = Column(Integer, primary_key=True, index=True)
     name    = Column(String(80), nullable=False, index=True)
     conv_key = Column(String(80), nullable=False)  # "chat_id:user_id", как строка
     state   = Column(String(40), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     __table_args__ = (UniqueConstraint("name", "conv_key", name="uq_bot_conv_name_key"),)
 
 
@@ -208,11 +213,27 @@ def _ensure_user_columns() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN last_digest_sent VARCHAR(10)"))
 
 
+def _ensure_bot_conversation_columns() -> None:
+    """Добавляет updated_at в существующую bot_conversation_state (нужен для
+    само-очистки зависших диалогов, см. модель выше)."""
+    from sqlalchemy import inspect, text
+
+    engine = _get_engine()
+    insp = inspect(engine)
+    if not insp.has_table("bot_conversation_state"):
+        return
+    cols = {c["name"] for c in insp.get_columns("bot_conversation_state")}
+    with engine.begin() as conn:
+        if "updated_at" not in cols:
+            conn.execute(text("ALTER TABLE bot_conversation_state ADD COLUMN updated_at TIMESTAMP"))
+
+
 def init_db():
     engine = _get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_hw_file_columns()
     _ensure_user_columns()
+    _ensure_bot_conversation_columns()
 
 
 def SessionLocal():
