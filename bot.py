@@ -17,9 +17,10 @@ from telegram import (
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, ContextTypes,
-    filters,
+    filters, BasePersistence,
 )
 from telegram.constants import ParseMode
+import json as _json
 
 from config import config
 from schedule_utils import (
@@ -1366,13 +1367,125 @@ _ptb_app: Optional[Application] = None
 _ptb_ready = False
 
 
+class DBPersistence(BasePersistence):
+    """Хранит context.user_data и состояния диалогов (ConversationHandler) в
+    Postgres. Обычная process-memory (то, что python-telegram-bot использует
+    по умолчанию без persistence) не переживает "холодный старт" serverless-
+    контейнера на Vercel: между /report (или /addhw, /cancellesson) и ответом
+    пользователя контейнер может пересоздаться, и диалог "теряется" — сообщение
+    приходит, но ни один обработчик его не ждёт, поэтому бот молчит.
+    chat_data/bot_data/callback_data ботом не используются — не персистим."""
+
+    async def get_user_data(self):
+        from database import SessionLocal, BotUserData
+        db = SessionLocal()
+        try:
+            return {r.user_id: _json.loads(r.data_json) for r in db.query(BotUserData).all()}
+        finally:
+            db.close()
+
+    async def update_user_data(self, user_id, data):
+        from database import SessionLocal, BotUserData
+        db = SessionLocal()
+        try:
+            payload = _json.dumps(data, default=str, ensure_ascii=False)
+            row = db.query(BotUserData).filter_by(user_id=user_id).first()
+            if row:
+                row.data_json = payload
+            else:
+                db.add(BotUserData(user_id=user_id, data_json=payload))
+            db.commit()
+        finally:
+            db.close()
+
+    async def drop_user_data(self, user_id):
+        from database import SessionLocal, BotUserData
+        db = SessionLocal()
+        try:
+            db.query(BotUserData).filter_by(user_id=user_id).delete()
+            db.commit()
+        finally:
+            db.close()
+
+    async def refresh_user_data(self, user_id, user_data):
+        pass  # всё уже загружено разом через get_user_data при старте
+
+    async def get_chat_data(self):
+        return {}
+
+    async def update_chat_data(self, chat_id, data):
+        pass
+
+    async def drop_chat_data(self, chat_id):
+        pass
+
+    async def refresh_chat_data(self, chat_id, chat_data):
+        pass
+
+    async def get_bot_data(self):
+        return {}
+
+    async def update_bot_data(self, data):
+        pass
+
+    async def refresh_bot_data(self, bot_data):
+        pass
+
+    async def get_callback_data(self):
+        return None
+
+    async def update_callback_data(self, data):
+        pass
+
+    async def get_conversations(self, name):
+        from database import SessionLocal, BotConversationState
+        db = SessionLocal()
+        try:
+            result = {}
+            for r in db.query(BotConversationState).filter_by(name=name).all():
+                key = tuple(int(p) for p in r.conv_key.split(":"))
+                try:
+                    state = int(r.state)
+                except ValueError:
+                    state = r.state
+                result[key] = state
+            return result
+        finally:
+            db.close()
+
+    async def update_conversation(self, name, key, new_state):
+        from database import SessionLocal, BotConversationState
+        conv_key = ":".join(str(k) for k in key)
+        db = SessionLocal()
+        try:
+            row = db.query(BotConversationState).filter_by(name=name, conv_key=conv_key).first()
+            if new_state is None:
+                if row:
+                    db.delete(row)
+                    db.commit()
+                return
+            state_str = str(new_state)
+            if row:
+                row.state = state_str
+            else:
+                db.add(BotConversationState(name=name, conv_key=conv_key, state=state_str))
+            db.commit()
+        finally:
+            db.close()
+
+    async def flush(self):
+        pass  # каждая операция уже коммитится сразу — отложенного буфера нет
+
+
 def build_application() -> Application:
     if not config.TELEGRAM_TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN не задан")
 
-    app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    app = Application.builder().token(config.TELEGRAM_TOKEN).persistence(DBPersistence()).build()
 
     cancellesson_conv = ConversationHandler(
+        name="cancellesson",
+        persistent=True,
         entry_points=[
             CommandHandler("cancellesson", cmd_cancellesson),
             CallbackQueryHandler(cb_cancellesson_start, pattern="^do:cancellesson$"),
@@ -1390,10 +1503,11 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("cancel", cancellesson_end)],
         allow_reentry=True,
-        per_message=True,
     )
 
     addhw_conv = ConversationHandler(
+        name="addhw",
+        persistent=True,
         entry_points=[
             CommandHandler("addhw", cmd_addhw),
             CallbackQueryHandler(cmd_addhw, pattern="^do:addhw$"),
@@ -1416,10 +1530,11 @@ def build_application() -> Application:
         },
         fallbacks=[CommandHandler("cancel", hw_cancel)],
         allow_reentry=True,
-        per_message=True,
     )
 
     report_conv = ConversationHandler(
+        name="report",
+        persistent=True,
         entry_points=[CommandHandler("report", cmd_report)],
         states={
             REPORT_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_get_text)],
@@ -1495,6 +1610,12 @@ async def process_webhook_update(payload: dict) -> None:
     ptb = await get_ptb_application()
     update = Update.de_json(payload, ptb.bot)
     await ptb.process_update(update)
+    # process_update() только ПОМЕЧАЕТ user_data/conversation-состояния как
+    # "изменились" — реальная запись в persistence происходит только здесь.
+    # PTB обычно делает это сам по таймеру внутри run_webhook()/run_polling(),
+    # но у нас свой цикл (Vercel-функция вызывается на каждый апдейт отдельно),
+    # так что без явного вызова изменения нигде не сохранятся.
+    await ptb.update_persistence()
 
 
 def _hw_notify_text(subj: str, desc: str, dl_str: str, deleted: bool = False) -> str:
