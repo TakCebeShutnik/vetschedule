@@ -1,5 +1,6 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, LargeBinary,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.pool import NullPool
@@ -116,6 +117,30 @@ class HomeworkMessage(Base):
     message_id = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     homework   = relationship("Homework", back_populates="messages")
+
+
+class BotUserData(Base):
+    """Хранилище context.user_data бота — переживает "холодный старт"
+    serverless-контейнера на Vercel (обычная память процесса для этого не
+    годится: между двумя сообщениями пользователя Vercel может поднять
+    новый контейнер, и всё, что лежало в памяти, исчезнет). Используется
+    для черновиков /addhw, /cancellesson и выбранной группы."""
+    __tablename__ = "bot_user_data"
+    user_id    = Column(Integer, primary_key=True)
+    data_json  = Column(Text, nullable=False, default="{}")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BotConversationState(Base):
+    """Активное состояние диалога (ConversationHandler) бота — та же причина,
+    что и у BotUserData: без этого таблицы разговор "теряется" при холодном
+    старте, и следующее сообщение пользователя падает в пустоту без ответа."""
+    __tablename__ = "bot_conversation_state"
+    id      = Column(Integer, primary_key=True, index=True)
+    name    = Column(String(80), nullable=False, index=True)
+    conv_key = Column(String(80), nullable=False)  # "chat_id:user_id", как строка
+    state   = Column(String(40), nullable=False)
+    __table_args__ = (UniqueConstraint("name", "conv_key", name="uq_bot_conv_name_key"),)
 
 
 class RateLimitHit(Base):
