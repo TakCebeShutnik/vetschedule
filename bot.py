@@ -63,6 +63,11 @@ HW_CODE, HW_SUBJECT, HW_DESCRIPTION, HW_DEADLINE = range(4)
 LES_CODE, LES_DAY, LES_PICK = 10, 11, 12
 REPORT_TEXT = 20
 
+# Если диалог (/addhw, /cancellesson, /report) брошен на середине дольше
+# этого времени — считаем его завершённым и не даём ему перехватывать
+# следующее сообщение пользователя. См. DBPersistence.get_conversations().
+STALE_CONVERSATION_MINUTES = 30
+
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
 
@@ -1441,14 +1446,24 @@ class DBPersistence(BasePersistence):
         from database import SessionLocal, BotConversationState
         db = SessionLocal()
         try:
+            cutoff = datetime.utcnow() - timedelta(minutes=STALE_CONVERSATION_MINUTES)
+            rows = db.query(BotConversationState).filter_by(name=name).all()
             result = {}
-            for r in db.query(BotConversationState).filter_by(name=name).all():
+            for r in rows:
+                if r.updated_at and r.updated_at < cutoff:
+                    # Диалог брошен на середине дольше STALE_CONVERSATION_MINUTES —
+                    # без этого он перехватывал бы следующее сообщение пользователя
+                    # (JobQueue-таймаут PTB тут не работает: нет живого процесса
+                    # между вызовами на serverless, см. комментарий у модели).
+                    db.delete(r)
+                    continue
                 key = tuple(int(p) for p in r.conv_key.split(":"))
                 try:
                     state = int(r.state)
                 except ValueError:
                     state = r.state
                 result[key] = state
+            db.commit()
             return result
         finally:
             db.close()
