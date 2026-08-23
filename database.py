@@ -45,6 +45,9 @@ class User(Base):
     is_admin     = Column(Boolean, default=False)
     created_at   = Column(DateTime, default=datetime.utcnow)
     notify_hours = Column(Integer, nullable=True)  # личная настройка "за сколько часов напомнить"; NULL = дефолт
+    digest_enabled = Column(Boolean, nullable=False, default=False)  # рассылка расписания по желанию, выкл. по умолчанию
+    digest_time    = Column(String(5), nullable=True)  # "HH:MM" по местному времени; NULL = дефолт (07:30)
+    last_digest_sent = Column(String(10), nullable=True)  # "YYYY-MM-DD" — чтобы не дублировать при частом cron
     homework     = relationship("Homework", back_populates="creator", foreign_keys="Homework.created_by")
 
 
@@ -161,7 +164,7 @@ def _ensure_hw_file_columns() -> None:
 
 
 def _ensure_user_columns() -> None:
-    """Добавляет notify_hours в существующую таблицу users (без потери данных)."""
+    """Добавляет notify_hours/digest_* в существующую таблицу users (без потери данных)."""
     from sqlalchemy import inspect, text
 
     engine = _get_engine()
@@ -172,6 +175,12 @@ def _ensure_user_columns() -> None:
     with engine.begin() as conn:
         if "notify_hours" not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN notify_hours INTEGER"))
+        if "digest_enabled" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN digest_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "digest_time" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN digest_time VARCHAR(5)"))
+        if "last_digest_sent" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_digest_sent VARCHAR(10)"))
 
 
 def init_db():
