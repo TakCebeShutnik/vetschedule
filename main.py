@@ -591,6 +591,25 @@ async def api_cron_reminders(secret: str = Query(...)):
     return {"ok": True}
 
 
+class ScheduleChangedPayload(BaseModel):
+    group: str
+    message: str
+
+
+@app.post("/api/cron/schedule-changed")
+async def api_cron_schedule_changed(payload: ScheduleChangedPayload, secret: str = Query(...)):
+    """Вызывается workflow'ом парсера (scripts/diff_and_notify_schedule.py)
+    после того, как расписание группы реально изменилось (не просто
+    переформатировалось). Рассылает готовый текст всем студентам группы."""
+    _check_cron_secret(secret)
+    if not config.TELEGRAM_TOKEN:
+        raise HTTPException(503, "TELEGRAM_TOKEN не задан")
+    from bot import notify_schedule_changed
+
+    await notify_schedule_changed(payload.group, payload.message)
+    return {"ok": True}
+
+
 @app.get("/api/telegram/setup-webhook")
 async def api_telegram_setup_webhook(secret: str = Query(...)):
     """Один раз после деплоя: ?secret=CRON_SECRET — привязать webhook к SITE_URL."""
