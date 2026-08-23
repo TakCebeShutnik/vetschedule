@@ -5,13 +5,14 @@ Telegram-бот расписания.
 Запуск: python bot.py
 """
 import logging
+import re
 import httpx
 from datetime import datetime, timedelta
 
 from typing import Optional
 
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand,
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -59,6 +60,7 @@ HW_EDITOR_CODE = config.EDITOR_CODE
 HW_CODE, HW_SUBJECT, HW_DESCRIPTION, HW_DEADLINE = range(4)
 # Состояния отмены пары: код → день → пара
 LES_CODE, LES_DAY, LES_PICK = 10, 11, 12
+REPORT_TEXT = 20
 
 
 # ─── API helpers ──────────────────────────────────────────────────────────────
@@ -1111,6 +1113,144 @@ async def cb_router(update: Update, ctx):
 
 # ─── Напоминания о дедлайнах ──────────────────────────────────────────────────
 
+async def cmd_report(update: Update, ctx):
+    """Начинает диалог: /report — просит описать проблему, затем шлёт админу."""
+    await update.effective_message.reply_text(
+        "🐞 <b>Сообщить об ошибке</b>\n"
+        f"{sep_line()}\n\n"
+        "Опиши, что не так в расписании или в работе бота — я перешлю разработчику.\n\n"
+        "Для отмены: /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    return REPORT_TEXT
+
+
+async def report_get_text(update: Update, ctx):
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.effective_message.reply_text("Напиши текстом, что случилось.")
+        return REPORT_TEXT
+    user = update.effective_user
+    group = get_group(ctx) or "—"
+    if config.ADMIN_TELEGRAM_ID:
+        try:
+            report = (
+                f"🐞 <b>Репорт от студента</b>\n{sep_line()}\n\n"
+                f"👤 {html_escape(user.full_name)} (@{user.username or '—'}, id {user.id})\n"
+                f"📚 Группа: {html_escape(group)}\n\n"
+                f"{html_escape(text)}"
+            )
+            await ctx.bot.send_message(chat_id=int(config.ADMIN_TELEGRAM_ID), text=report, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            log.warning("Не удалось переслать репорт админу: %s", e)
+    await update.effective_message.reply_text("✅ Спасибо! Сообщение передано разработчику.")
+    return ConversationHandler.END
+
+
+async def report_cancel(update: Update, ctx):
+    await update.effective_message.reply_text("Отменено.")
+    return ConversationHandler.END
+
+
+async def cmd_digest(update: Update, ctx):
+    """Рассылка расписания на сегодня в заданное время — по желанию, выключена
+    по умолчанию. /digest on [HH:MM] — включить (дефолт 07:30), /digest off — выключить."""
+    from database import SessionLocal, User
+    tg_id = update.effective_user.id
+    args = ctx.args or []
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_id == tg_id).first()
+        if not user:
+            await update.effective_message.reply_text(
+                "⚠️ Сначала открой /start и выбери группу.", parse_mode=ParseMode.HTML
+            )
+            return
+        if not args:
+            if user.digest_enabled:
+                t = user.digest_time or "07:30"
+                await update.effective_message.reply_text(
+                    f"📬 <b>Утренняя рассылка</b>\n{sep_line()}\n\n"
+                    f"Включена, приходит в <b>{html_escape(t)}</b>.\n\n"
+                    f"Изменить время: <code>/digest on 08:00</code>\n"
+                    f"Выключить: <code>/digest off</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await update.effective_message.reply_text(
+                    f"📬 <b>Утренняя рассылка расписания</b>\n{sep_line()}\n\n"
+                    "Сейчас выключена — бот ничего не присылает сам.\n\n"
+                    "Включить: <code>/digest on</code> (по умолчанию в 07:30)\n"
+                    "Или со своим временем: <code>/digest on 08:00</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+            return
+        cmd = args[0].lower()
+        if cmd == "off":
+            user.digest_enabled = False
+            db.commit()
+            await update.effective_message.reply_text("✅ Рассылка выключена.")
+            return
+        if cmd == "on":
+            time_str = "07:30"
+            if len(args) > 1:
+                time_str = args[1].strip()
+                if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", time_str):
+                    await update.effective_message.reply_text(
+                        "⚠️ Время в формате ЧЧ:ММ, например: /digest on 08:00"
+                    )
+                    return
+            user.digest_enabled = True
+            user.digest_time = time_str
+            db.commit()
+            await update.effective_message.reply_text(f"✅ Буду присылать расписание на сегодня в {time_str}.")
+            return
+        await update.effective_message.reply_text("Используй: /digest on [ЧЧ:ММ] или /digest off")
+    finally:
+        db.close()
+
+
+async def send_daily_digests(app):
+    """Рассылка расписания на сегодня тем, кто включил /digest. Проверяется
+    вместе с напоминаниями (cron каждые 30 мин) — шлём один раз в день, как
+    только текущее время перевалило за личное digest_time пользователя."""
+    if not HW_STATUS_ENABLED:
+        pass  # рассылка не зависит от флага ДЗ — просто явное напоминание, что это отдельная фича
+    from database import SessionLocal, User
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    db = SessionLocal()
+    try:
+        now = _dt.now(ZoneInfo(config.APP_TIMEZONE))
+        today_str = now.strftime("%Y-%m-%d")
+        now_hm = now.strftime("%H:%M")
+        users = db.query(User).filter(
+            User.digest_enabled == True, User.telegram_id.isnot(None)
+        ).all()
+        for user in users:
+            if user.last_digest_sent == today_str:
+                continue  # уже отправили сегодня
+            target = user.digest_time or "07:30"
+            if now_hm < target:
+                continue  # ещё не время
+            if not user.group_name:
+                continue
+            try:
+                data = await api_get(f"/schedule/{user.group_name}/today")
+                if data.get("day"):
+                    body = format_day_text(data["day"]) + "\n" + sep_line("·", 12)
+                    text = f"📅 <b>Доброе утро! Сегодня:</b>\n\n{body}"
+                else:
+                    text = "📅 <b>Доброе утро!</b>\n\nСегодня занятий нет — можно отдохнуть 🎉"
+                await app.bot.send_message(chat_id=user.telegram_id, text=text, parse_mode=ParseMode.HTML)
+                user.last_digest_sent = today_str
+            except Exception as e:
+                log.warning("Не удалось отправить дайджест %s: %s", user.telegram_id, e)
+        db.commit()
+    finally:
+        db.close()
+
+
 async def cmd_remindme(update: Update, ctx):
     """Личная настройка времени напоминания: /remindme 6 — за 6 часов до дедлайна.
     Без аргумента — показывает текущее значение и подсказку."""
@@ -1279,6 +1419,15 @@ def build_application() -> Application:
         per_message=True,
     )
 
+    report_conv = ConversationHandler(
+        entry_points=[CommandHandler("report", cmd_report)],
+        states={
+            REPORT_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, report_get_text)],
+        },
+        fallbacks=[CommandHandler("cancel", report_cancel)],
+        allow_reentry=True,
+    )
+
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("schedule", cmd_schedule))
     app.add_handler(CommandHandler("today",    cmd_today))
@@ -1286,8 +1435,10 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("week",     cmd_week))
     app.add_handler(CommandHandler("hw",       cmd_hw))
     app.add_handler(CommandHandler("remindme", cmd_remindme))
+    app.add_handler(CommandHandler("digest",   cmd_digest))
     app.add_handler(addhw_conv)
     app.add_handler(cancellesson_conv)
+    app.add_handler(report_conv)
     app.add_handler(CallbackQueryHandler(cb_group_select, pattern=r"^grp:"))
     app.add_handler(CallbackQueryHandler(cb_week_nav,     pattern=r"^week:"))
     app.add_handler(CallbackQueryHandler(cb_hw_back,      pattern=r"^hw_back$"))
@@ -1300,8 +1451,27 @@ def build_application() -> Application:
             lambda _: send_deadline_reminders(app),
             interval=1800, first=60,
         )
+        app.job_queue.run_repeating(
+            lambda _: send_daily_digests(app),
+            interval=1800, first=90,
+        )
 
     return app
+
+
+BOT_COMMANDS = [
+    ("start",       "Выбрать группу / перезапустить бота"),
+    ("schedule",    "Расписание на текущую неделю"),
+    ("today",       "Пары на сегодня"),
+    ("tomorrow",    "Пары на завтра"),
+    ("week",        "Выбрать другую неделю"),
+    ("hw",          "Домашние задания"),
+    ("addhw",       "Добавить задание (нужен код)"),
+    ("cancellesson","Отметить пару отменённой (нужен код)"),
+    ("remindme",    "Личное время напоминания о дедлайне"),
+    ("digest",      "Утренняя/вечерняя рассылка расписания — вкл/выкл"),
+    ("report",      "Сообщить об ошибке в расписании"),
+]
 
 
 async def get_ptb_application() -> Application:
@@ -1311,6 +1481,12 @@ async def get_ptb_application() -> Application:
     if not _ptb_ready:
         await _ptb_app.initialize()
         await _ptb_app.start()
+        try:
+            await _ptb_app.bot.set_my_commands(
+                [BotCommand(cmd, desc) for cmd, desc in BOT_COMMANDS]
+            )
+        except Exception as e:
+            log.warning("Не удалось обновить меню команд: %s", e)
         _ptb_ready = True
     return _ptb_app
 
@@ -1430,6 +1606,30 @@ async def notify_homework_deleted(subject: str, messages: list) -> None:
             log.warning("Не удалось пометить удалённым ДЗ (чат %s): %s", chat_id, e)
 
 
+async def notify_schedule_changed(group_name: str, message: str) -> None:
+    """Рассылает готовый HTML-текст всем студентам группы. Используется для
+    уведомления об изменении расписания после обновления PDF колледжа —
+    см. /api/cron/schedule-changed и scripts/diff_and_notify_schedule.py."""
+    if not config.TELEGRAM_TOKEN:
+        return
+    from database import SessionLocal, User
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(
+            User.group_name == group_name, User.telegram_id.isnot(None)
+        ).all()
+        if not users:
+            return
+        ptb = await get_ptb_application()
+        for user in users:
+            try:
+                await ptb.bot.send_message(chat_id=user.telegram_id, text=message, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                log.warning("Не удалось уведомить %s об изменении расписания: %s", user.telegram_id, e)
+    finally:
+        db.close()
+
+
 async def notify_lesson_override(group_name: str, day_date: str, time: str, subject: str,
                                    cancelled: bool, note: Optional[str] = None) -> None:
     """Уведомляет в Telegram всех студентов группы об отмене/восстановлении пары.
@@ -1461,7 +1661,8 @@ async def notify_lesson_override(group_name: str, day_date: str, time: str, subj
 
 
 async def run_reminders_once() -> None:
-    """Разовый прогон напоминаний о дедлайнах — вызывается из /api/cron/reminders.
+    """Разовый прогон напоминаний о дедлайнах и утренней рассылки —
+    вызывается из /api/cron/reminders.
 
     В webhook-режиме (Vercel) нет постоянного процесса, поэтому job_queue не
     работает: см. build_application(). Вместо этого внешний cron дёргает
@@ -1469,6 +1670,7 @@ async def run_reminders_once() -> None:
     """
     ptb = await get_ptb_application()
     await send_deadline_reminders(ptb)
+    await send_daily_digests(ptb)
 
 
 async def register_webhook() -> str:
