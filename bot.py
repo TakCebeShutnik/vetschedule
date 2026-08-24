@@ -77,6 +77,49 @@ async def api_get(path: str, **params) -> dict:
         r.raise_for_status()
         return r.json()
 
+
+class WeekNotFoundError(Exception):
+    """Запрошенная неделя не распарсена. .available — список тех, что есть."""
+    def __init__(self, requested: int, available: list):
+        self.requested = requested
+        self.available = available
+        super().__init__(f"week {requested} not found, available: {available}")
+
+
+class NoScheduleDataError(Exception):
+    """У группы вообще нет ни одной распарсенной недели."""
+
+
+async def resolve_week(group: str, requested_week: Optional[int] = None):
+    """Возвращает (week_num, week_dict) для группы.
+
+    В расписании обычно распарсена лишь одна-две недели (то, что сейчас
+    опубликовал колледж в PDF), а не весь год — поэтому current_iso_week()
+    может не совпадать ни с одной реально существующей неделей. Раньше
+    команды слепо запрашивали week/{current_iso_week()} и падали в 404.
+    Если week_num не передан — берём ближайшую по факту доступную неделю
+    (предпочитая будущую), а не считаем её равной календарной ISO-неделе.
+    """
+    data = await api_get(f"/schedule/{group}")
+    weeks_map = {w["week"]: w for w in data.get("weeks", [])}
+    if not weeks_map:
+        raise NoScheduleDataError()
+
+    if requested_week is not None:
+        if requested_week in weeks_map:
+            return requested_week, weeks_map[requested_week]
+        raise WeekNotFoundError(requested_week, sorted(weeks_map))
+
+    cur = current_iso_week()
+    if cur in weeks_map:
+        return cur, weeks_map[cur]
+    upcoming = sorted(w for w in weeks_map if w >= cur)
+    if upcoming:
+        return upcoming[0], weeks_map[upcoming[0]]
+    past = sorted(w for w in weeks_map if w < cur)
+    return past[-1], weeks_map[past[-1]]
+
+
 async def api_post(path: str, json: dict) -> dict:
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(f"{API_BASE}{path}", json=json)
@@ -379,17 +422,21 @@ async def _show_week(update: Update, ctx, week_num=None):
             parse_mode=ParseMode.HTML,
         )
         return
-    if week_num is None:
-        week_num = current_iso_week()
     try:
-        week = await api_get(f"/schedule/{group}/week/{week_num}")
-    except httpx.HTTPStatusError as e:
-        msg = (
-            f"📭 <b>Неделя {week_num}</b> не найдена в расписании."
-            if e.response.status_code == 404
-            else f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>"
+        week_num, week = await resolve_week(group, week_num)
+    except WeekNotFoundError as e:
+        avail = ", ".join(str(w) for w in e.available) or "—"
+        await update.effective_message.reply_text(
+            f"📭 <b>Неделя {e.requested}</b> не найдена в расписании.\n\n"
+            f"Доступные недели: <b>{html_escape(avail)}</b>",
+            parse_mode=ParseMode.HTML,
         )
-        await update.effective_message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return
+    except NoScheduleDataError:
+        await update.effective_message.reply_text(
+            "📭 Расписание для этой группы пока не загружено.",
+            parse_mode=ParseMode.HTML,
+        )
         return
     except Exception as e:
         await update.effective_message.reply_text(
@@ -423,7 +470,18 @@ async def cmd_schedule(update: Update, ctx):
     await _show_week(update, ctx)
 
 async def cmd_week(update: Update, ctx):
-    await _show_week(update, ctx)
+    """/week — ближайшая доступная неделя. /week 36 — конкретная неделя."""
+    requested = None
+    if ctx.args:
+        try:
+            requested = int(ctx.args[0])
+        except ValueError:
+            await update.effective_message.reply_text(
+                "⚠️ Укажи номер недели числом, например: <code>/week 36</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+    await _show_week(update, ctx, requested)
 
 async def cb_week_nav(update: Update, ctx):
     await update.callback_query.answer()
@@ -814,7 +872,8 @@ async def hw_get_deadline(update: Update, ctx):
     return await _save_hw(update.message, ctx)
 
 async def _save_hw(message, ctx):
-    draft = ctx.user_data.get("hw_draft", {})
+    draft = dict(ctx.user_data.get("hw_draft", {}))
+    draft["editor_code"] = HW_EDITOR_CODE  # код уже проверен в hw_check_editor_code, сервер требует его повторно
     try:
         hw = await api_post("/homework", draft)
         dl_str = "—"
@@ -916,9 +975,14 @@ def _cancel_date_from_cb(data: str) -> str:
 
 async def cancel_show_day_menu(update: Update, ctx):
     group = get_group(ctx)
-    week_num = current_iso_week()
     try:
-        week = await api_get(f"/schedule/{group}/week/{week_num}")
+        week_num, week = await resolve_week(group)
+    except NoScheduleDataError:
+        await update.effective_message.reply_text(
+            "📭 Расписание для этой группы пока не загружено.",
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
     except Exception as e:
         await update.effective_message.reply_text(
             f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>",
@@ -992,13 +1056,18 @@ async def cancel_pick_day(update: Update, ctx):
                         day = d
                         break
             if day is None:
-                week_num = ctx.user_data.get("cancel_week_num") or current_iso_week()
-                week = await api_get(f"/schedule/{group}/week/{week_num}")
-                ctx.user_data["cancel_week"] = week
-                for d in week.get("days", []):
-                    if d.get("date") == date_key:
-                        day = d
-                        break
+                week_num = ctx.user_data.get("cancel_week_num")
+                try:
+                    week_num, week = await resolve_week(group, week_num)
+                except (WeekNotFoundError, NoScheduleDataError):
+                    week = None
+                if week:
+                    ctx.user_data["cancel_week"] = week
+                    ctx.user_data["cancel_week_num"] = week_num
+                    for d in week.get("days", []):
+                        if d.get("date") == date_key:
+                            day = d
+                            break
     except Exception as e:
         await query.message.reply_text(
             f"❌ <b>Ошибка</b>\n\n<code>{html_escape(str(e))}</code>",
@@ -1450,7 +1519,13 @@ class DBPersistence(BasePersistence):
             rows = db.query(BotConversationState).filter_by(name=name).all()
             result = {}
             for r in rows:
-                if r.updated_at and r.updated_at < cutoff:
+                if r.updated_at is None or r.updated_at < cutoff:
+                    # NULL — запись создана ДО миграции, добавившей это поле;
+                    # раз мы не знаем, когда её реально трогали в последний
+                    # раз, считаем устаревшей на всякий случай (иначе такая
+                    # строка осталась бы "вечно активной" и перехватывала бы
+                    # сообщения бессрочно — именно та проблема, которую эта
+                    # само-очистка должна была решить).
                     # Диалог брошен на середине дольше STALE_CONVERSATION_MINUTES —
                     # без этого он перехватывал бы следующее сообщение пользователя
                     # (JobQueue-таймаут PTB тут не работает: нет живого процесса
