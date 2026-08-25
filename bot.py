@@ -1207,6 +1207,7 @@ async def report_get_text(update: Update, ctx):
         return REPORT_TEXT
     user = update.effective_user
     group = get_group(ctx) or "—"
+    delivered = False
     if config.ADMIN_TELEGRAM_ID:
         try:
             report = (
@@ -1216,9 +1217,19 @@ async def report_get_text(update: Update, ctx):
                 f"{html_escape(text)}"
             )
             await ctx.bot.send_message(chat_id=int(config.ADMIN_TELEGRAM_ID), text=report, parse_mode=ParseMode.HTML)
+            delivered = True
         except Exception as e:
-            log.warning("Не удалось переслать репорт админу: %s", e)
-    await update.effective_message.reply_text("✅ Спасибо! Сообщение передано разработчику.")
+            log.exception("Не удалось переслать репорт админу (ADMIN_TELEGRAM_ID=%s): %s", config.ADMIN_TELEGRAM_ID, e)
+    if delivered:
+        await update.effective_message.reply_text("✅ Спасибо! Сообщение передано разработчику.")
+    else:
+        # Раньше тут всегда писалось "передано", даже если отправка упала
+        # или ADMIN_TELEGRAM_ID вообще не настроен — пользователь думал, что
+        # всё ок, а сообщение никуда не уходило. Больше не врём об успехе.
+        await update.effective_message.reply_text(
+            "⚠️ Записал, но переслать разработчику не получилось (не настроен приём репортов). "
+            "Текст сохранён в логах бота."
+        )
     return ConversationHandler.END
 
 
