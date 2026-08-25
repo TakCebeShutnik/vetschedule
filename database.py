@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, LargeBinary,
+    create_engine, Column, Integer, BigInteger, String, DateTime, Text, Boolean, ForeignKey, LargeBinary,
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -40,7 +40,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id           = Column(Integer, primary_key=True, index=True)
-    telegram_id  = Column(Integer, unique=True, nullable=True, index=True)
+    telegram_id  = Column(BigInteger, unique=True, nullable=True, index=True)
     name         = Column(String(120), nullable=False)
     group_name   = Column(String(60), nullable=True)
     is_admin     = Column(Boolean, default=False)
@@ -113,7 +113,7 @@ class HomeworkMessage(Base):
     __tablename__ = "homework_messages"
     id         = Column(Integer, primary_key=True, index=True)
     hw_id      = Column(Integer, ForeignKey("homework.id"), nullable=False, index=True)
-    chat_id    = Column(Integer, nullable=False)
+    chat_id    = Column(BigInteger, nullable=False)
     message_id = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     homework   = relationship("Homework", back_populates="messages")
@@ -126,7 +126,7 @@ class BotUserData(Base):
     новый контейнер, и всё, что лежало в памяти, исчезнет). Используется
     для черновиков /addhw, /cancellesson и выбранной группы."""
     __tablename__ = "bot_user_data"
-    user_id    = Column(Integer, primary_key=True)
+    user_id    = Column(BigInteger, primary_key=True)
     data_json  = Column(Text, nullable=False, default="{}")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -228,12 +228,44 @@ def _ensure_bot_conversation_columns() -> None:
             conn.execute(text("ALTER TABLE bot_conversation_state ADD COLUMN updated_at TIMESTAMP"))
 
 
+def _ensure_bigint_telegram_id_columns() -> None:
+    """users.telegram_id, homework_messages.chat_id и bot_user_data.user_id
+    хранят Telegram user_id/chat_id — эти ID давно перевалили за 32-битный
+    диапазон INTEGER (макс. ~2.1 млрд), у новых аккаунтов ID уже за 6+ млрд.
+    Таблицы, созданные раньше этого фикса, остались с обычным INTEGER —
+    досоздаём их BIGINT'ом. На SQLite (локальные тесты) этой проблемы нет
+    вообще (динамический размер целых) — пропускаем."""
+    from sqlalchemy import inspect, text
+
+    engine = _get_engine()
+    if "sqlite" in str(engine.url).lower():
+        return
+    insp = inspect(engine)
+    targets = [
+        ("users", "telegram_id"),
+        ("homework_messages", "chat_id"),
+        ("bot_user_data", "user_id"),
+    ]
+    with engine.begin() as conn:
+        for table, col in targets:
+            if not insp.has_table(table):
+                continue
+            cols = {c["name"]: c["type"] for c in insp.get_columns(table)}
+            if col not in cols:
+                continue
+            if "BIG" in str(cols[col]).upper():
+                continue  # уже BIGINT — на serverless init_db() дёргается на
+                          # каждом холодном старте, лишний ALTER не нужен
+            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE BIGINT"))
+
+
 def init_db():
     engine = _get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_hw_file_columns()
     _ensure_user_columns()
     _ensure_bot_conversation_columns()
+    _ensure_bigint_telegram_id_columns()
 
 
 def SessionLocal():
