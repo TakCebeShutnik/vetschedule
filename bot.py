@@ -1277,6 +1277,15 @@ async def cmd_digest(update: Update, ctx):
                     return
             user.digest_enabled = True
             user.digest_time = time_str
+            # Если целевое время на сегодня уже прошло — не шлём "задним числом"
+            # на ближайшем тике cron, а ждём завтрашнего утра. Без этой пометки
+            # send_daily_digests увидел бы now_hm >= target и разослал бы сразу.
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(config.APP_TIMEZONE))
+            if now.strftime("%H:%M") >= time_str:
+                user.last_digest_sent = now.strftime("%Y-%m-%d")
+            else:
+                user.last_digest_sent = None
             db.commit()
             await update.effective_message.reply_text(f"✅ Буду присылать расписание на сегодня в {time_str}.")
             return
@@ -1567,11 +1576,36 @@ class DBPersistence(BasePersistence):
         pass  # каждая операция уже коммитится сразу — отложенного буфера нет
 
 
+async def on_error(update, context) -> None:
+    """Глобальный обработчик ошибок PTB. Без него любое необработанное
+    исключение внутри хендлера (например, в report_get_text) молча
+    логируется на сервере и никак не видно ни пользователю, ни разработчику —
+    бот выглядит так, будто просто "не отвечает". Пересылаем traceback
+    админу, если он настроен, чтобы не искать проблему вслепую по симптомам."""
+    log.exception("Необработанная ошибка при обработке апдейта:", exc_info=context.error)
+    if not config.ADMIN_TELEGRAM_ID:
+        return
+    try:
+        import traceback
+        tb = "".join(traceback.format_exception(None, context.error, context.error.__traceback__))
+        tb = tb[-3500:]  # лимит длины сообщения Telegram
+        upd_info = update.to_dict() if isinstance(update, Update) else str(update)
+        text = (
+            f"⚠️ <b>Ошибка в боте</b>\n{sep_line()}\n\n"
+            f"<pre>{html_escape(tb)}</pre>\n\n"
+            f"Update: <code>{html_escape(str(upd_info))[:500]}</code>"
+        )
+        await context.bot.send_message(chat_id=int(config.ADMIN_TELEGRAM_ID), text=text, parse_mode=ParseMode.HTML)
+    except Exception:
+        log.exception("Не удалось переслать traceback админу")
+
+
 def build_application() -> Application:
     if not config.TELEGRAM_TOKEN:
         raise RuntimeError("TELEGRAM_TOKEN не задан")
 
     app = Application.builder().token(config.TELEGRAM_TOKEN).persistence(DBPersistence()).build()
+    app.add_error_handler(on_error)
 
     cancellesson_conv = ConversationHandler(
         name="cancellesson",
@@ -1705,7 +1739,25 @@ async def process_webhook_update(payload: dict) -> None:
     # PTB обычно делает это сам по таймеру внутри run_webhook()/run_polling(),
     # но у нас свой цикл (Vercel-функция вызывается на каждый апдейт отдельно),
     # так что без явного вызова изменения нигде не сохранятся.
-    await ptb.update_persistence()
+    #
+    # Оборачиваем в try — это отдельный шаг ПОСЛЕ process_update(), обработчик
+    # ошибок PTB (add_error_handler) сюда не дотягивается. Если тут упадёт —
+    # ответ пользователю уже ушёл (process_update отработал), но conversation
+    # state/user_data этого хода рискуют не сохраниться, поэтому логируем и
+    # шлём себе, а не теряем ошибку молча.
+    try:
+        await ptb.update_persistence()
+    except Exception as e:
+        log.exception("update_persistence() упал: %s", e)
+        if config.ADMIN_TELEGRAM_ID:
+            try:
+                await ptb.bot.send_message(
+                    chat_id=int(config.ADMIN_TELEGRAM_ID),
+                    text=f"⚠️ update_persistence() упал:\n<pre>{html_escape(str(e))}</pre>",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
 
 
 def _hw_notify_text(subj: str, desc: str, dl_str: str, deleted: bool = False) -> str:
