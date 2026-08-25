@@ -1396,7 +1396,7 @@ async def send_deadline_reminders(app):
     db = SessionLocal()
     try:
         # Дедлайны в БД хранятся как введённые студентом — по местному времени
-        # колледжа (Asia/Novosibirsk), не в UTC. Поэтому и "сейчас" берём в той
+        # колледжа (Europe/Moscow — см. config.APP_TIMEZONE), не в UTC. Поэтому и "сейчас" берём в той
         # же таймзоне, а не utcnow() — иначе сравнение сдвинуто на несколько часов.
         now = _dt.now(ZoneInfo(config.APP_TIMEZONE)).replace(tzinfo=None)
         # Берём с запасом на самое большое возможное личное окно (14 дней),
